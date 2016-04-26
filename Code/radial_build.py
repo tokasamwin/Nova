@@ -303,7 +303,7 @@ class RB(object):
                 self.targets = pickle.load(input)
                 self.Rb = pickle.load(input)
                 self.Zb = pickle.load(input)
-        self.Rb,self.Zb = self.midplane_loop(self.Rb,self.Zb)  # clockwise LFS
+        #self.Rb,self.Zb = self.midplane_loop(self.Rb,self.Zb)  # clockwise LFS
         self.R,self.Z = self.trim_contour(self.Rb,self.Zb) # update fw
         self.sf.nlim = len(self.Rb)  # update sf
         self.sf.xlim,self.sf.ylim = self.Rb,self.Zb
@@ -337,7 +337,6 @@ class RB(object):
         layer_index = 0  # first open flux surface
         self.sf.sol()
         for leg in self.targets.keys():
-            #Rsol,Zsol = self.sf.pick_leg(leg,layer_index)
             Rsol,Zsol = self.sf.snip(leg,layer_index)
             Ro,Zo = Rsol[-1],Zsol[-1]
             
@@ -377,7 +376,7 @@ class RB(object):
             in zip(Flip,Direction,Theta_end,Phi_target):
                 R,Z = self.match_psi(Ro,Zo,direction,theta_end,theta_sign,
                                      psi_target,self.targets[leg]['graze'],
-                                     dPlate,debug=debug)
+                                     dPlate,leg,debug=debug)
                 self.targets[leg]['R'] = np.append(self.targets[leg]['R'],R[::flip])
                 self.targets[leg]['Z'] = np.append(self.targets[leg]['Z'],Z[::flip])
             if leg is 'outer':
@@ -417,13 +416,16 @@ class RB(object):
             r,z = self.connect(self.psi_fw[1],['outer','inner'],[-1,0],
                                loop=(self.R,self.Z))
             Rb,Zb = self.append(Rb,Zb,r,z)
+
         
-        self.get_legs()
+        
         #if 'SX' in self.conf.config: Rb,Zb = self.inflate_divertor(Rb,Zb)
         #if not self.conf.conformal: Rb,Zb = self.fw_offset(Rb,Zb,dr=0.66)
-        self.write_boundary(Rb,Zb)
+        self.Rb,self.Zb = self.midplane_loop(Rb,Zb)
+        self.get_legs()  # trim to targets
+        self.write_boundary(self.Rb,self.Zb)
         #self.write_boundary_feild(Rb,Zb)
-        return Rb,Zb
+        return self.Rb,self.Zb
         
     def append(self,R,Z,r,z):
         dr = np.zeros(2)
@@ -434,6 +436,7 @@ class RB(object):
         return np.append(R,r[1:-1]),np.append(Z,z[1:-1]) 
 
     def get_legs(self):
+        self.trim_sol(plot=True)
         for leg in self.targets.keys():
             L2D,L3D,Rsol,Zsol = self.sf.connection(leg,0)
             Ro,Zo = Rsol[-1],Zsol[-1]
@@ -477,18 +480,18 @@ class RB(object):
         #color = 'k'
         for c,leg in enumerate(self.sf.legs.keys()):
             if 'core' not in leg:
-                print(leg)
                 Rsol = self.sf.legs[leg]['R']
                 Zsol = self.sf.legs[leg]['Z']
                 for i in range(self.sf.Nsol):
                     if len(Rsol[i]) > 0:
-                        R,Z = self.inloop(self.Rb[::-1],self.Zb[::-1],
-                                          Rsol[i],Zsol[i])  
+                        R,Z = Rsol[i],Zsol[i]
+                        for j in range(2):  # predict - correct
+                            R,Z = self.inloop(self.Rb[::-1],self.Zb[::-1],R,Z)
                         self.sf.legs[leg]['R'][i] = R  # update sf
                         self.sf.legs[leg]['Z'][i] = Z
                         if plot:
                             if color != 'k' and i > 0:
-                                pl.plot(R,Z,color=color[c+3])
+                                pl.plot(R,Z,'-',color=color[c+3])
                             elif color == 'k':
                                 pl.plot(R,Z,'-',color='k',alpha=0.15)
                             else:
@@ -511,6 +514,9 @@ class RB(object):
         index = np.argmin((Rb-self.sf.LFfwr)**2+(Zb-self.sf.LFfwz)**2)
         Rb = np.append(Rb[:index+1][::-1],Rb[index:][::-1])
         Zb = np.append(Zb[:index+1][::-1],Zb[index:][::-1])
+        Lb = self.length(Rb,Zb)
+        index = np.append(np.diff(Lb)!=0,True)
+        Rb,Zb = Rb[index],Zb[index]  # remove duplicates
         return Rb,Zb
         
     def write_boundary_feild(self,Rb,Zb):
@@ -529,37 +535,39 @@ class RB(object):
                 f.write('{:1.4f}\t{:1.4f}\n'.format(Bp,Bphi))
         
     def write_boundary(self,Rb,Zb):
-        Rb,Zb = Rb[::-1],Zb[::-1]  # flip boundary (clockwise)
+        #Rb,Zb = self.rzSLine(Rb,Zb,s=0,Hres=True)
+        #Rb,Zb = self.rzSLine(Rb,Zb,s=2e-4,Np=558)
         with open('../Data/'+self.conf.dataname+'_bdry.txt','w') as f:
             f.write(self.conf.filename.split('/')[-1]+'\n')
             if self.conf.conformal:
                 f.write('conformal boundary placed {:1.0f}'\
                 .format(1e3*self.conf.dRfw))
-                f.write('mm from LCFS at LFS\n\n')
+                f.write('mm from LCFS at LFS\n')
+                f.write('connection calculated at ')
+                f.write('{:1.2f}mm from LFS\n\n'.format(1e3*self.sf.Dsol[-1]))
             else:
                 f.write('constant offset boundary placed {:1.0f}'.format(66))
                 f.write('cm from LCFS\n\n')
-            f.write('target\tgraze\topen\tRo[m]\tZo[m]\tL2D[m]\tL3D[m]\n')
+            f.write('target\tgraze[deg]\topen\tRo[m]\t\tZo[m]\t\tTo[deg]\tL2D[m]\tL3D[m]\n')
             for leg in self.targets.keys():
                 target = self.targets[leg]
                 f.write(leg+'\t')
-                f.write('{:1.2f}\t'.format(target['graze']*180/np.pi))
+                f.write('{:1.2f}\t\t'.format(target['graze']*180/np.pi))
                 if target['open']:
                     f.write('open\t')
                 else:
                     f.write('closed\t')
-                f.write('{:1.2f}\t'.format(target['Ro']))
-                f.write('{:1.2f}\t'.format(target['Zo']))
-                f.write('{:1.2f}\t'.format(target['L2Do'][-1]))
-                f.write('{:1.2f}\t\n'.format(target['L3Do'][-1]))
+                f.write('{:1.6f}\t'.format(target['Ro']))
+                f.write('{:1.6f}\t'.format(target['Zo']))
+                f.write('{:1.2f}\t'.format(target['theta']*180/np.pi))
+                f.write('{:1.3f}\t'.format(target['L2Dedge'][-1]))
+                f.write('{:1.3f}\t\n'.format(target['L3Dedge'][-1]))
             f.write('\n')
-                
             f.write('boundary segments clockwise from outboard midplane\n')
-            f.write('ro[m]\tr1[m]\tzo[m]\tz1[m]\n')
-            f.write('{:1.0f}\n'.format(len(Rb)-1))
-            for i in range(len(Rb)-1):
-                f.write('{:1.4f}\t{:1.4f}\t'.format(Rb[i],Rb[i+1]))
-                f.write('{:1.4f}\t{:1.4f}\n'.format(Zb[i],Zb[i+1]))
+            f.write('r[m]\t\tz[m]\n')
+            f.write('{:1.0f}\n'.format(len(Rb)))
+            for i in range(len(Rb)):
+                f.write('{:1.12f}\t{:1.12f}\n'.format(Rb[i],Zb[i]))  # dp
     
     def crossed_lines(self,Ro,Zo,R1,Z1):
         index = np.zeros(2)
@@ -571,54 +579,67 @@ class RB(object):
         return index
                 
     def inloop(self,Rloop,Zloop,R,Z):
+        L = self.length(R,Z)
+        index = np.append(np.diff(L)!=0,True)
+        R,Z = R[index],Z[index]  # remove duplicates
         nRloop,nZloop = self.normal(Rloop,Zloop)
         Rin,Zin = np.array([]),np.array([])
+
         for r,z in zip(R,Z):
             i = np.argmin((r-Rloop)**2+(z-Zloop)**2)
             dr = [Rloop[i]-r,Zloop[i]-z]  
             dn = [nRloop[i],nZloop[i]]
             if np.dot(dr,dn) > 0:
                 Rin,Zin = np.append(Rin,r),np.append(Zin,z)
+        i = np.argmin((Rin[-1]-R)**2+(Zin[-1]-Z)**2)
+        Rin,Zin = R[:i+2],Z[:i+2] # extend past target
         i = np.argmin((Rin[-1]-R)**2+(Zin[-1]-Z)**2)  # sol crossing bndry
-        if i == len(R)-1: i -= 1 
-        j = np.zeros(2)
-        for k in range(2):
-            j[k] = np.argmin((R[i+k]-Rloop)**2+(Z[i+k]-Zloop)**2)
-        if j[0] == j[1]: j = np.array([j[0]-1,j[0]+1])
+        jo = np.argmin((R[i]-Rloop)**2+(Z[i]-Zloop)**2)
+        j = np.array([jo,jo+1])
         s = np.array([R[i],Z[i]])
+        ds = np.array([R[i]-R[i-1],Z[i]-Z[i-1]])
         b = np.array([Rloop[j[0]],Zloop[j[0]]])
-        ds = np.array([R[i+1]-R[i],Z[i+1]-Z[i]])
-        db = np.array([Rloop[j[1]]-Rloop[j[0]],Zloop[j[1]]-Zloop[j[0]]])
-        step = np.cross(b-s,ds)/np.cross(ds,db)
-        intersect = b+step*db
+        bstep,db = self.get_bstep(s,ds,b,Rloop,Zloop,j)
+        if bstep < 0:
+            j = np.array([jo-1,jo])  # switch target pannel
+            bstep,db = self.get_bstep(s,ds,b,Rloop,Zloop,j)
+        step = np.cross(b-s,db)/np.cross(ds,db)
+        intersect = s+step*ds  # predict - correct
+        if step < 0:  # step back
+            Rin,Zin = Rin[:-1],Zin[:-1]
         Rin,Zin = np.append(Rin,intersect[0]),np.append(Zin,intersect[1])
         return Rin,Zin
+        
+    def get_bstep(self,s,ds,b,Rloop,Zloop,j):
+        db = np.array([Rloop[j[1]]-Rloop[j[0]],Zloop[j[1]]-Zloop[j[0]]])
+        step = np.cross(b-s,ds)/np.cross(ds,db)
+        return step,db
 
     def match_psi(self,Ro,Zo,direction,theta_end,theta_sign,phi_target,graze,
-                  dPlate,debug=False):        
+                  dPlate,leg,debug=False):        
         color = sns.color_palette('Set2',2)
-        gain = 0.5  # 0.25
+        gain = 0.15  # 0.25
         Nmax = 500
         Lo = [5,0.015]  # [blend,turn]  0.015
         r2m = [-2,-1]  # ramp to step (+ive-lead, -ive-lag ramp==1, step==inf)
-        Nplate = 1  # number of target plate divisions (1==flat)
+        Nplate = 1 # number of target plate divisions (1==flat)
         L = Lo[0] if theta_end == 0 else Lo[1]
         flag = 0
-        print('rz',Ro,Zo)
         for i in range(Nmax):
             R,Z,phi = self.blend_target(Ro,Zo,dPlate,L,direction,theta_end,
                                         theta_sign,graze,r2m,Nplate)
             L -= gain*(phi_target-phi)
             if debug: pl.plot(R,Z,color=color[0])
             if np.abs(phi_target-phi) < 1e-5:
-                if debug: pl.plot(R,Z,'r',color=color[1])
-                print('N',i)
+                if debug: 
+                    pl.plot(R,Z,'r',color=color[1])
+                    print('rz',Ro,Zo,'N',i)
                 break
             if L < 0:
                 L = 1
                 gain *= -1
             if i == Nmax-1 or L>15:
-                print('phi target convergence error')
+                print(leg,'dir',direction,'phi target convergence error')
                 print('Nmax',i+1,'L',L)
                 if flag == 0:
                     break
@@ -637,10 +658,11 @@ class RB(object):
                                      theta_end,theta_sign,
                                      direction,graze,False,
                                      target=True)  # constant graze 
-            Ninterp = int(dPlate/(2*dL))
-            if Ninterp < 2: Ninterp = 2
-            R,Z = self.rzInterp(R,Z,Ninterp)
-            graze = self.sf.get_graze(R,Z)  # update max graze
+            #Ninterp = int(dPlate/(2*dL))
+            #if Ninterp < 2: Ninterp = 2
+            #R,Z = self.rzInterp(R,Z,Ninterp)
+            graze = self.sf.get_graze([R[-1],Z[-1]],
+                                      [R[-1]-R[-2],Z[-1]-Z[-2]])  # update graze
             N = np.int(L/dL+1)
             if N<30: N=30
             dL = L/(N-1)

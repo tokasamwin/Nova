@@ -6,7 +6,7 @@ class Config(object):
     def __init__(self,config,inside=False):
         self.conformal = True
         self.dSOL=0.003  # [m]
-        self.Nsol=5
+        self.Nsol=51
         self.dRfw = 0.25  # [m]
         self.div_ex = 0.3
         self.TFopp = 'V'  # TF shape optimisation 'L'==length, 'V'==volume
@@ -48,6 +48,9 @@ class Config(object):
             self.trim = [0.71,0.74]  # trim fraction (in/out)
             self.filename = '../eqdsk/Equil_AR3d1_16coils_bt_1d03li_0d8_I'
             self.filename += 'pl_20d25_SX_on_SFgeom_NOEDDY_EOF_fine_iter5_v3.eqdsk'
+            #self.filename = '../eqdsk/2015_SX_ext_coils_eqdk_2MK6XX_v1_0.eqdsk'  # IDM
+            
+            
             self.dataname = 'SX'
             self.coils = {'internal':{'id':[],'dR':[],'dZ':[]},
                      'external':{'id':list(range(10,16)),'dR':[],'dZ':[]}}
@@ -264,7 +267,7 @@ class Config(object):
                      'external':{'id':range(10,16),'dR':[],'dZ':[]}}  # list(range(0,13))
             self.targets['inner'] = {'L2D':[0.95],'open':False,  #0.85
                                      'graze':self.graze,'dR':-1}
-            self.targets['outer'] = {'L2D':[1.95],'open':False,  # 1.9
+            self.targets['outer'] = {'L2D':[1.92],'open':False,  # 1.9,1.95
                                      'graze':1.0*np.pi/180,'dR':0} #2.433 386
                                      
                                      
@@ -301,6 +304,7 @@ class Config(object):
             #self.filename = '../eqdsk/Equil_AR3d1_bt_1d03li_0d8_Ipl'+\
             #'_20d25_EOF_2M56U8_v1_0.eqdsk'
             self.filename = '../eqdsk/2015_SN_eqdk_2MG9A4_v1_0.eqdsk'
+            self.filename = '../eqdsk/2015_SN_eqdk_2MG9A4_v1_0_IDM.eqdsk'
             self.dataname = 'SND'
             self.coils = {'internal':{'id':[],'dR':[],'dZ':[]},
                      'external':{'id':[0,4],'dR':[],'dZ':[]}}  #list(range(0,11))

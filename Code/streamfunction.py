@@ -8,6 +8,7 @@ from itertools import count,cycle
 import geqdsk
 import seaborn as sns
 from matplotlib._cntr import Cntr as cntr
+from elliptic import EQ
 
 class SF(object):
     
@@ -27,13 +28,13 @@ class SF(object):
         self.set_flux(eq)  # calculate flux profiles
         self.set_TF(eq)  
         self.set_current(eq)
-        self.upsample(sample)
         xo_arg = np.argmin(self.zbdry)
         self.xo = [self.rbdry[xo_arg],self.zbdry[xo_arg]]
         self.mo = [eq['rmagx'],eq['zmagx']]
         self.Bfeild()
         self.get_Xpsi()
         self.get_Mpsi()
+        self.upsample(sample)
         self.set_contour()  # set cfeild
         self.xlim,self.ylim,self.nlim = eq['xlim'],eq['ylim'],eq['nlim']
         if 'SF' in conf.config:
@@ -42,6 +43,7 @@ class SF(object):
             self.rcirc,self.drcirc = 1.25,0.25
         else:
             self.rcirc,self.drcirc = 0.5,0.25
+        #self.conf.TF(self)
             
     def normalise(self):
         if 'Fiesta' in self.eq['name'] or 'Nova' in self.eq['name']\
@@ -200,6 +202,10 @@ class SF(object):
         
     def upsample(self,sample):
         if sample>1:
+            '''
+            EQ(self,n=sample*self.n)
+            self.space()
+            '''
             from scipy.interpolate import RectBivariateSpline as rbs
             sample = np.int(np.float(sample))
             interp_psi = rbs(self.r,self.z,self.psi)
@@ -212,6 +218,7 @@ class SF(object):
     def space(self):
         self.nr = len(self.r)
         self.nz = len(self.z)
+        self.n = self.nr*self.nz
         self.dr = (self.r[-1]-self.r[0])/(self.nr-1)  
         self.dz = (self.z[-1]-self.z[0])/(self.nz-1)
         self.r2d,self.z2d = np.meshgrid(self.r,self.z,indexing='ij')
@@ -407,9 +414,12 @@ class SF(object):
         R,Z = np.array([]),np.array([])
         for line in psi_line:
             r,z = line[:,0],line[:,1]
-            loop = np.sqrt((r[0]-r[-1])**2+(z[0]-z[-1])**2) < delta_loop
-            if (z>self.Mpoint[1]).any() and (z<self.Mpoint[1]).any() and loop:
-                R,Z = np.append(R,r),np.append(Z,z)    
+            index = z >= self.Xpoint[1]
+            if sum(index) > 0:
+                r,z = r[index],z[index]
+                loop = np.sqrt((r[0]-r[-1])**2+(z[0]-z[-1])**2) < delta_loop
+                if (z>self.Mpoint[1]).any() and (z<self.Mpoint[1]).any() and loop:
+                    R,Z = np.append(R,r),np.append(Z,z)    
         R,Z = self.clock(R,Z)
         return R,Z
         
@@ -435,9 +445,8 @@ class SF(object):
                        args=(z),options={'xtol': 1e-7,'disp': False})  
         return res.x[0]
         
-    def get_LFP(self,xo=None,alpha=1-1e-5):
+    def get_LFP(self,xo=None,alpha=1-1e-3):
         r,z = self.get_boundary(alpha=alpha)
-        print(self.Xpsi,self.Spsi)
         if self.Xpoint[1] < self.Mpoint[1]:
             index = z>self.Xpoint[1]
         else:  # alowance for upper Xpoint
@@ -471,7 +480,7 @@ class SF(object):
         print('recalc sol psi',self.Nsol,self.dSOL)   
         self.get_LFP()
         self.Dsol = np.linspace(0,dr,self.Nsol)
-        self.Dsol[0] = self.Dsol[1]/2
+        #self.Dsol[0] = self.Dsol[1]/2
         r = self.LFPr+self.Dsol
         z = self.LFPz*np.ones(len(r))
         self.sol_psi = np.zeros(len(r))
@@ -479,16 +488,15 @@ class SF(object):
             self.sol_psi[i] = self.Pcoil([rp,zp])
         
     def sol(self,dr=0,Nsol=0,plot=False,update=False):  # dr [m]
-        if update or not hasattr(self,'sol_psi') or dr > self.conf.dSOL: 
-            if dr > self.conf.dSOL: print('re-calculating LFP')
+        if update or not hasattr(self,'sol_psi') or dr > self.conf.dSOL\
+        or Nsol > self.Nsol: 
             self.get_sol_psi(dr=dr,Nsol=Nsol)  # re-calculcate LFP
         elif (Nsol>0 and Nsol != self.Nsol) or \
         (dr>0 and dr != self.dSOL):  # update  
             if dr>0: self.dSOL = dr
             if Nsol>0: self.Nsol = Nsol
             Dsol = np.linspace(0,self.conf.dSOL,self.Nsol)
-            Dsol[0] = Dsol[1]/2
-            print(Dsol,self.Dsol)
+            #Dsol[0] = Dsol[1]/2
             self.sol_psi = interp1(self.Dsol,self.sol_psi)(Dsol)
             self.Dsol = Dsol
         contours = self.get_contour(self.sol_psi)    
@@ -844,14 +852,13 @@ class SF(object):
             Zsol = Zsol[Xindex:]
         return (Rsol,Zsol)
         
-    def get_graze(self,R,Z):
-        T = np.array([R[-1]-R[-2],Z[-1]-Z[-2]])
-        T /= np.sqrt(T[0]**2+T[1]**2)  # normal target vector
-        B = self.Bcoil([R[-1],Z[-1]])
-        B /= np.sqrt(B[0]**2+B[1]**2)  # normal poloidal feild line vector
+    def get_graze(self,point,target):
+        T = target / np.sqrt(target[0]**2+target[1]**2)  # target vector
+        B = self.Bcoil([point[0],point[1]])
+        B /= np.sqrt(B[0]**2+B[1]**2)  # poloidal feild line vector
         theta = np.arccos(np.dot(B,T))
         if theta > np.pi/2: theta = np.pi-theta
-        Xi = self.expansion([R[-1]],[Z[-1]])
+        Xi = self.expansion([point[0]],[point[1]])
         graze = np.arcsin(np.sin(theta)*(Xi[-1]**2+1)**-0.5)
         return graze
         
@@ -871,10 +878,15 @@ class SF(object):
             Xi = np.append(Xi,Bphi/Bp)  # feild expansion
         return Xi
         
-    def connection(self,leg,layer_index):
-        Rsol,Zsol = self.snip(leg,layer_index)  # rb.trim_sol to trim to targets
-        #Rsol = self.legs[leg]['R'][layer_index]
-        #Zsol = self.legs[leg]['Z'][layer_index] 
+    def connection(self,leg,layer_index,snip=False):
+        if snip:  # trim targets to L2D
+            Rsol,Zsol = self.snip(leg,layer_index)  
+        else:  # rb.trim_sol to trim to targets
+            Rsol = self.legs[leg]['R'][layer_index]
+            Zsol = self.legs[leg]['Z'][layer_index] 
+        Lsol = self.length(Rsol,Zsol)
+        index = np.append(np.diff(Lsol)!=0,True)
+        Rsol,Zsol = Rsol[index],Zsol[index]  # remove duplicates
         if len(Rsol) < 2:
             L2D,L3D = [0],[0]
         else:

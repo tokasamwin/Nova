@@ -1,6 +1,5 @@
 import pylab as pl
 import numpy as np
-import matplotlib as mpl
 from itertools import cycle
 from eqConfig import Config
 from radial_build import RB
@@ -11,7 +10,6 @@ from addtext import linelabel
 import time
 from inverse import INV
 import cross_coil as cc
-from scipy.interpolate import RectBivariateSpline as RBS
 
 #from elliptic import grid
 #import cross_coil as cc
@@ -24,36 +22,73 @@ sns.set(context='talk',style='white',font='sans-serif',palette='Set2',
 color = sns.color_palette('Set2')
 Color = cycle(color)
 
-config = 'SN'  # SN,X,SX,SX8,SFm,SX2
+config = 'SX8'  # SN,X,SX,SX8,SFm,SX2
 
 pl.figure(figsize=(10*14/16,10))
 pl.axis('equal')
 pl.axis('off')
 #pl.ylim([-12.5,11])
-#pl.ylim([-6,-4])
+#pl.xlim([7,8])
 
 
 conf = Config(config)
-sf = SF(conf,sample=1,Nova=False)
-
-
-
-EQ(sf,n=5e4)  # limit=[5.5,13,-7,5],
-
-
-
-
-
+sf = SF(conf,Nova=False)
 sf.contour()
+#eq = EQ(sf,sigma=0.2,limit=[5.5,12,-8,5],n=1e4)  # resample
+#eq.plotj()
 
-
-'''
+#
 conf.TF(sf)
 rb = RB(conf,sf,Np=250)
-rb.divertor_outline(False,plot=True,debug=False)
-'''
+rb.divertor_outline(True,plot=True,debug=False)
 
-#rb.trim_sol(Nsol=3,plot=True)
+
+#filename = '2015_First_Wall_and_Divertor_CCFE_2MGVE7_v1_0.txt'
+filename = '2015_First_Wall_and_Divertor_CCFE_2MKUGH_v1_0.txt'
+filename = 'SX_bdry.txt'
+with open('../Data/'+filename) as f:
+    for i in range(5):    
+        f.readline()
+    outer = f.readline().split()
+    ro,zo = float(outer[3]),float(outer[4])
+    for i in range(3):    
+        f.readline()
+    n = int(f.readline())
+    r,z = np.zeros(n),np.zeros(n)
+    for i,line in enumerate(f):
+        data = line.split()
+        if len(data) == 2:
+            r[i],z[i] = data[0],data[1]
+        else:
+            r[i],z[i] = data[0],data[2]
+pl.plot(r,z,'-')
+pl.plot(ro,zo,'o')
+
+rb.Rb,rb.Zb = r,z
+
+
+
+rb.trim_sol(plot=True)
+
+leg = 'outer'
+Rt,Zt = rb.Rb,rb.Zb  # rb.targets[leg]['R'], rb.targets[leg]['Z']
+n = rb.normal(Rt,Zt)
+T = np.dot(np.matrix([[0,-1],[1,0]]),n)
+
+
+graze = np.ones(sf.Nsol)
+for i in range(sf.Nsol):
+    ro,zo = sf.legs[leg]['R'][i][-1],sf.legs[leg]['Z'][i][-1]
+    index = np.argmin((Rt-ro)**2+(Zt-zo)**2)
+
+    graze[i] = 180/np.pi*sf.get_graze([ro,zo],T[:,index])
+    print(i,index,graze[i])
+    #pl.plot(ro,zo,'o')
+
+pl.figure()
+pl.plot(sf.Dsol,graze)
+
+
 
 #sf.set_plasma({'r':eq.r,'z':eq.z,'psi':eq.psi},contour=True)
 #sf.write_flux()
