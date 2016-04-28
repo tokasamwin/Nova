@@ -11,6 +11,7 @@ class RB(object):
     
     def __init__(self,conf,sf,Np=800,flip=1):
         self.sf = sf
+        self.TFwidth(sf)
         self.conf = conf
         self.targets = conf.targets
         self.Np = Np
@@ -416,15 +417,9 @@ class RB(object):
             r,z = self.connect(self.psi_fw[1],['outer','inner'],[-1,0],
                                loop=(self.R,self.Z))
             Rb,Zb = self.append(Rb,Zb,r,z)
-
-        
-        
-        #if 'SX' in self.conf.config: Rb,Zb = self.inflate_divertor(Rb,Zb)
-        #if not self.conf.conformal: Rb,Zb = self.fw_offset(Rb,Zb,dr=0.66)
         self.Rb,self.Zb = self.midplane_loop(Rb,Zb)
         self.get_legs()  # trim to targets
         self.write_boundary(self.Rb,self.Zb)
-        #self.write_boundary_feild(Rb,Zb)
         return self.Rb,self.Zb
         
     def append(self,R,Z,r,z):
@@ -436,7 +431,7 @@ class RB(object):
         return np.append(R,r[1:-1]),np.append(Z,z[1:-1]) 
 
     def get_legs(self):
-        self.trim_sol(plot=True)
+        self.trim_sol(plot=False)
         for leg in self.targets.keys():
             L2D,L3D,Rsol,Zsol = self.sf.connection(leg,0)
             Ro,Zo = Rsol[-1],Zsol[-1]
@@ -452,27 +447,6 @@ class RB(object):
             self.targets[leg]['Zo'] = Zo 
             self.targets[leg]['Rsol'] = Rsol
             self.targets[leg]['Zsol'] = Zsol 
-    
-    def inflate_divertor(self,Rb,Zb):
-        Rb,Zb = self.midplane_loop(Rb,Zb)  # boundary clockwise from LFS
-        Rb,Zb = Rb[::-1],Zb[::-1]  # flip boundary (to clockwise)
-        Rb,Zb = self.rzSLine(Rb,Zb,Np=len(Rb))  # smooth
-        index = np.zeros(3)
-        for i,leg in enumerate(['inner','outer']):  # targets
-            index[i] = np.argmin((self.targets[leg]['Ro']-Rb)**2+
-                               (self.targets[leg]['Zo']-Zb)**2)
-        iplus = np.argmin((self.sf.xo[0]-Rb[index[1]:])**2+
-                          (self.sf.xo[1]-Zb[index[1]:])**2)
-        Rplus,Zplus = Rb[index[1]:][iplus],Zb[index[1]:][iplus]
-        index[i+1] = np.argmin((Rplus-Rb)**2+(Zplus-Zb)**2)  # X-point end
-        R,Z = self.offset(Rb,Zb,self.conf.inflate)  # offset diveror rejoin
-        for i,start,end,trans in zip(range(2),[0.1,0.1],[0.9,0.9],[0.4,0.4]):
-            w = self.window(int(index[i+1]-index[i]),start,end,trans)
-            Rb[index[i]:index[i+1]] = w*R[index[i]:index[i+1]]+(1-w)\
-            *Rb[index[i]:index[i+1]]
-            Zb[index[i]:index[i+1]] = w*Z[index[i]:index[i+1]]+(1-w)\
-            *Zb[index[i]:index[i+1]]
-        return Rb,Zb
         
     def trim_sol(self,dr=0,Nsol=0,update=False,color='k',plot=True):
         self.sf.sol(dr=dr,Nsol=Nsol,update=update)
@@ -543,7 +517,7 @@ class RB(object):
                 f.write('conformal boundary placed {:1.0f}'\
                 .format(1e3*self.conf.dRfw))
                 f.write('mm from LCFS at LFS\n')
-                f.write('connection calculated at ')
+                f.write('connection calculated from Xpoint at ')
                 f.write('{:1.2f}mm from LFS\n\n'.format(1e3*self.sf.Dsol[-1]))
             else:
                 f.write('constant offset boundary placed {:1.0f}'.format(66))
@@ -567,7 +541,7 @@ class RB(object):
             f.write('r[m]\t\tz[m]\n')
             f.write('{:1.0f}\n'.format(len(Rb)))
             for i in range(len(Rb)):
-                f.write('{:1.12f}\t{:1.12f}\n'.format(Rb[i],Zb[i]))  # dp
+                f.write('{:1.6f}\t{:1.6f}\n'.format(Rb[i],Zb[i]))  # dp
     
     def crossed_lines(self,Ro,Zo,R1,Z1):
         index = np.zeros(2)
@@ -618,12 +592,13 @@ class RB(object):
     def match_psi(self,Ro,Zo,direction,theta_end,theta_sign,phi_target,graze,
                   dPlate,leg,debug=False):        
         color = sns.color_palette('Set2',2)
-        gain = 0.15  # 0.25
-        Nmax = 500
-        Lo = [5,0.015]  # [blend,turn]  0.015
+        gain = 0.1  # 0.25
+        Nmax = 750
+        Lo = [5,0.015]  # [blend,turn]  5,0.015
         r2m = [-2,-1]  # ramp to step (+ive-lead, -ive-lag ramp==1, step==inf)
         Nplate = 1 # number of target plate divisions (1==flat)
         L = Lo[0] if theta_end == 0 else Lo[1]
+        Lsead = L
         flag = 0
         for i in range(Nmax):
             R,Z,phi = self.blend_target(Ro,Zo,dPlate,L,direction,theta_end,
@@ -640,7 +615,7 @@ class RB(object):
                 gain *= -1
             if i == Nmax-1 or L>15:
                 print(leg,'dir',direction,'phi target convergence error')
-                print('Nmax',i+1,'L',L)
+                print('Nmax',i+1,'L',L,'Lo',Lsead)
                 if flag == 0:
                     break
                     gain *= -1  # reverse gain
@@ -658,9 +633,9 @@ class RB(object):
                                      theta_end,theta_sign,
                                      direction,graze,False,
                                      target=True)  # constant graze 
-            #Ninterp = int(dPlate/(2*dL))
-            #if Ninterp < 2: Ninterp = 2
-            #R,Z = self.rzInterp(R,Z,Ninterp)
+            Ninterp = int(dPlate/(2*dL))
+            if Ninterp < 2: Ninterp = 2
+            R,Z = self.rzInterp(R,Z,Ninterp)
             graze = self.sf.get_graze([R[-1],Z[-1]],
                                       [R[-1]-R[-2],Z[-1]-Z[-2]])  # update graze
             N = np.int(L/dL+1)
@@ -923,17 +898,25 @@ class RB(object):
             for rin,zin,rout,zout in zip(VVinR,VVinZ,VVoutR,VVoutZ):
                 f.write('{:1.6f}\t{:1.6f}\t{:1.6f}\t{:1.6f}\n'.format(\
                 rin,zin,rout,zout))
+                
+    def TFwidth(self,sf):
+        Icoil = 2*np.pi*sf.rcentr*\
+        np.abs(sf.bcentr)/(4*np.pi*1e-7)/self.nTF # coil amp-turns
+        Acoil = Icoil/self.Jmax
+        self.dRcoil = np.sqrt(Acoil)
+        self.dRcoil = 0.489
+        self.dRsteel = 0.15*self.dRcoil
  
     def TFfill(self,part_fill=True):
         self.fitTF(self.xCoil)
         self.R,self.Z,L = self.drawTF(self.xCoil, Nspace=self.Np)  
         self.TFinR,self.TFinZ = self.R,self.Z
         self.rzPut()
-        self.fill(dR=0,dt=self.conf.dRsteel,trim=None,color='k',alpha=0.6,
+        self.fill(dR=0,dt=self.dRsteel,trim=None,color='k',alpha=0.6,
                   part_fill=False,loop=True)
-        self.fill(dt=self.conf.dRcoil,trim=None,color='k',alpha=0.3,
+        self.fill(dt=self.dRcoil,trim=None,color='k',alpha=0.3,
                   label='TF coil',part_fill=False,loop=True)
-        self.fill(dt=self.conf.dRsteel,trim=None,color='k',alpha=0.6,
+        self.fill(dt=self.dRsteel,trim=None,color='k',alpha=0.6,
                   label='TF support',part_fill=False,loop=True)
         self.TFoutR,self.TFoutZ = self.R,self.Z
         
@@ -989,7 +972,7 @@ class RB(object):
     def length_ratio(self):
         self.Plength = self.length(self.Rp,self.Zp,norm=False)[-1]
         Rtf,Ztf,L = self.drawTF(self.xCoil, Nspace=300)
-        R,Z = self.offset(Rtf,Ztf,self.conf.dRsteel+self.conf.dRcoil/2)
+        R,Z = self.offset(Rtf,Ztf,self.dRsteel+self.dRcoil/2)
         self.TFlength = self.length(R,Z,norm=False)[-1]
         self.Rlength = self.TFlength/self.Plength
     
@@ -1018,8 +1001,8 @@ class RB(object):
         Rloop,Zloop,L = self.drawTF(xCoil, Nspace=500)
         switch = 1 if Side is 'in' else -1
         if Side is 'out':
-            Rloop,Zloop = self.offset(Rloop,Zloop,self.conf.dRcoil+
-                                      2*self.conf.dRsteel)
+            Rloop,Zloop = self.offset(Rloop,Zloop,self.dRcoil+
+                                      2*self.dRsteel)
         nRloop,nZloop = self.normal(Rloop,Zloop)
         R,Z = self.TFbound[Side]['R'],self.TFbound[Side]['Z']
         dsum = 0
@@ -1088,7 +1071,7 @@ class RB(object):
         Rex,Zex = self.coil_corners(self.conf.coils['external'])  # external coils
         #if 'Coil2' in self.sf.coil.keys():
         #    ro_min = self.sf.coil['Coil2']['r']+self.sf.coil['Coil2']['dr']/2+\
-        #    self.conf.dRcoil+2*self.conf.dRsteel
+        #    self.dRcoil+2*self.dRsteel
         #else:
         ro_min = 4.35
         internal = {'R':np.append(Rb,Rin),'Z':np.append(Zb,Zin)}

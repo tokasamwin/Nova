@@ -6,7 +6,6 @@ from scipy.interpolate import RectBivariateSpline as RBS
 from scipy.interpolate import InterpolatedUnivariateSpline as IUS
 from scipy.interpolate import interp1d as interp1
 import seaborn as sns
-from eqConfig import Config
 from radial_build import RB
 import scipy.optimize as op
 from itertools import cycle

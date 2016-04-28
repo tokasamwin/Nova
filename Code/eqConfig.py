@@ -1,11 +1,11 @@
 import numpy as np
 import collections
 
-class Config(object):
+class eqsetup(object):
     
     def __init__(self,config,inside=False):
         self.conformal = True
-        self.dSOL=0.003  # [m]
+        self.dSOL=0.005  # [m]
         self.Nsol=51
         self.dRfw = 0.25  # [m]
         self.div_ex = 0.3
@@ -16,10 +16,10 @@ class Config(object):
         #self.BS = np.array([1.075,1.56])  # blanket+sheild (in/out)
         self.BS = np.array([0.78-0.2,1.304-0.2])  # blanket+sheild (in/out) #PMI xls
         self.BS -= (self.tfw+self.tBBsupport)
-        BBfrac = np.array([0.8,0.65])
-        BBfrac = np.array([1,1])
-        self.BB = list(BBfrac*self.BS)  # breeding blanket thickness (in/out)
-        self.sheild = list((1-BBfrac)*self.BS)  # neutron sheilding
+        self.BBfrac = np.array([0.8,0.65])
+        self.BBfrac = np.array([1,1])
+        self.BB = list(self.BBfrac*self.BS)  # breeding blanket thickness (in/out)
+        self.sheild = list((1-self.BBfrac)*self.BS)  # neutron sheilding
         #self.sheild = [0.2,0.6]
         #self.VV = 0.32  # vacumn vessel thickness (in/out)
         self.VV = [0.587,1.2]  # vacumn vessel thickness (in/out)
@@ -29,37 +29,9 @@ class Config(object):
         self.nTF = 18  # number of TF coils
         self.Jmax = 30e6  # 15e6  # max current density
         self.trim = [0.93,0.81]  # trim fraction (in/out)
-        self.inside = inside
         self.config = config
         self.targets = collections.OrderedDict()
-        if inside:
-            self.config += '_inside'
-        
-        if config == 'SX8':
-            self.dRfw = 0.25  # [m]
-            self.TFopp = 'L'
-            self.inflate = 0
-            self.div_ex = 1
-            self.dPlate = 0.5  # target plate length
-            self.sheild_connect=[0.15,0.9]
-            self.sheild_base = -1
-            self.Dsheild =[0,1]  # inner outer 0-1
-            self.Dsheild =[]  # inner outer 0-1
-            self.trim = [0.71,0.74]  # trim fraction (in/out)
-            self.filename = '../eqdsk/Equil_AR3d1_16coils_bt_1d03li_0d8_I'
-            self.filename += 'pl_20d25_SX_on_SFgeom_NOEDDY_EOF_fine_iter5_v3.eqdsk'
-            #self.filename = '../eqdsk/2015_SX_ext_coils_eqdk_2MK6XX_v1_0.eqdsk'  # IDM
-            
-            
-            self.dataname = 'SX'
-            self.coils = {'internal':{'id':[],'dR':[],'dZ':[]},
-                     'external':{'id':list(range(10,16)),'dR':[],'dZ':[]}}
-            self.targets['inner'] = {'L2D':[1.1],'open':False,
-                                     'graze':self.graze,'dR':0}
-            self.targets['outer'] = {'L2D':[3.55],'open':False,
-                                     'graze':self.graze,'dR':0}
-                                     
-        
+                
         if config == 'vde':
             self.dRfw = 0.25  # [m]
             self.TFopp = 'L'
@@ -77,6 +49,56 @@ class Config(object):
                      'external':{'id':list(range(10,16)),'dR':[],'dZ':[]}}
             self.targets['inner'] = {'L2D':[1.1],'open':False,'graze':self.graze,'dR':0.1}
             self.targets['outer'] = {'L2D':[3.55],'open':False,'graze':self.graze,'dR':0.1}
+        
+        if config == 'SX8_IDM':
+            self.dRfw = 0.25  # [m]
+            self.TFopp = 'L'
+            self.inflate = 0
+            self.div_ex = 1
+            self.dPlate = 0.5  # target plate length
+            self.sheild_connect=[0.15,0.9]
+            self.sheild_base = -1
+            self.Dsheild =[0,1]  # inner outer 0-1
+            self.Dsheild =[]  # inner outer 0-1
+            self.trim = [0.71,0.74]  # trim fraction (in/out)
+
+            self.filename = '../eqdsk/2015_SX_ext_coils_eqdk_2MK6XX_v1_0.eqdsk'  # IDM
+
+            self.dataname = 'SX8_IDM'
+            self.coils = {'internal':{'id':[],'dR':[],'dZ':[]},
+                     'external':{'id':list(range(10,16)),'dR':[],'dZ':[]}}
+            self.targets['inner'] = {'L2D':[1.1],'open':False,
+                                     'graze':self.graze,'dR':0}
+            self.targets['outer'] = {'L2D':[3.55],'open':False,
+                                     'graze':self.graze,'dR':0} 
+                                     
+        if config == 'SX8':
+            self.dRfw = 0.25  # [m]
+            self.TFopp = 'L'
+            self.inflate = 0
+            self.div_ex = 1
+            self.dPlate = 0.5  # target plate length
+            self.sheild_connect=[0.15,0.9]
+            self.sheild_base = -1
+            self.Dsheild =[0,1]  # inner outer 0-1
+            self.Dsheild =[]  # inner outer 0-1
+            self.trim = [0.71,0.74]  # trim fraction (in/out)
+            self.filename = '../eqdsk/Equil_AR3d1_16coils_bt_1d03li_0d8_I'
+            self.filename += 'pl_20d25_SX_on_SFgeom_NOEDDY_EOF_fine_iter5_v3.eqdsk'
+            
+            #self.filename = '../eqdsk/Equil_AR3d1_16coils_bt_1d03li_0d8_I'
+            #self.filename += 'pl_20d25_SX_on_SFgeom_NOEDDY_EOF_fine_iter5_v3_new.eqdsk'
+            self.filename = '../eqdsk/2015_SX_ext_coils_eqdk_2MK6XX_v1_0.eqdsk'  # IDM
+            #self.filename = '../eqdsk/Equil_AR3d1_16coils_bt_1d03li_0d8_Ipl_'
+            #self.filename += '20d25_SX_on_SFgeom_NOEDDY_EOF_fine_iter3_v5_old.eqdsk'
+
+            self.dataname = 'SX8'
+            self.coils = {'internal':{'id':[],'dR':[],'dZ':[]},
+                     'external':{'id':list(range(10,16)),'dR':[],'dZ':[]}}
+            self.targets['inner'] = {'L2D':[1.1],'open':False,
+                                     'graze':self.graze,'dR':0}
+            self.targets['outer'] = {'L2D':[3.55],'open':False,
+                                     'graze':self.graze,'dR':0}   
 
         if config == 'SX7':
             self.dRfw = 0.25  # [m]
@@ -335,6 +357,7 @@ class Config(object):
             
             self.filename = '../eqdsk/Equil_AR3d1_16coils_SFminus_v4_2015'+\
             '_09_bt_1d03li_0d8_Ipl_20d25_SOF.eqdsk'
+            #self.filename = '../eqdsk/2015_SFminus_eqdsk_2MCQRZ_v1_0_IDM.eqdsk'
 
             self.dataname = 'SFm'
             self.coils = {'internal':{'id':[],'dR':[],'dZ':[]},
@@ -367,13 +390,14 @@ class Config(object):
             self.targets['inner2'] = {'L2D':[1.2],'open':False,'graze':self.graze,'dR':-1}
             self.targets['outer1'] = {'L2D':[1.65],'open':False,'graze':self.graze,'dR':-1}
             self.targets['outer2'] = {'L2D':[1.1],'open':True,'graze':self.graze,'dR':0.1}  
-                     
-    def TF(self,sf):
-        Icoil = 2*np.pi*sf.rcentr*\
-        np.abs(sf.bcentr)/(4*np.pi*1e-7)/self.nTF # coil amp-turns
-        Acoil = Icoil/self.Jmax
-        self.dRcoil = np.sqrt(Acoil)
-        self.dRcoil = 0.489
-        self.dRsteel = 0.15*self.dRcoil
-                 
+                    
+        keys = ['conformal','dSOL','Nsol','dRfw','div_ex','TFopp',
+                'sheild_base','tfw','tBBsupport','BS','BBfrac','BB',
+                'sheild','VV','graze','dPlate','nTF','Jmax','trim',
+                'config','targets']
+        config = {}
+        for key in keys:  # package as dict
+            config[key] = getattr(self,key)
+        print(config)
+        return config         
         

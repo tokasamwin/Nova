@@ -8,43 +8,55 @@ from itertools import count,cycle
 import geqdsk
 import seaborn as sns
 from matplotlib._cntr import Cntr as cntr
-from elliptic import EQ
 
 class SF(object):
     
-    def __init__(self,conf,sample=1,Nova=False):
-        self.type = 'eqdsk'
-        self.conf = conf
-        self.Nsol = conf.Nsol
-        if Nova:
-            eq = geqdsk.read('../eqdsk/'+self.conf.config+'.eqdsk')
-        else:
-            eq = geqdsk.read(conf.filename)
+    def __init__(self,filename,config='',upsample=1,**kwargs):
+        self.set_kwargs(kwargs)
+        eq = geqdsk.read('../eqdsk/'+filename)
         self.eq = eq
         self.normalise()  # unit normalisation
-        self.set_plasma(eq)
+        self.set_plasma(eq,contour=False)
         self.set_boundary(eq['rbdry'],eq['zbdry'])
-        self.set_coils(eq)
+        self.set_coils(eq,config)
         self.set_flux(eq)  # calculate flux profiles
         self.set_TF(eq)  
         self.set_current(eq)
         xo_arg = np.argmin(self.zbdry)
         self.xo = [self.rbdry[xo_arg],self.zbdry[xo_arg]]
         self.mo = [eq['rmagx'],eq['zmagx']]
-        self.Bfeild()
         self.get_Xpsi()
         self.get_Mpsi()
-        self.upsample(sample)
+        self.upsample(upsample)
         self.set_contour()  # set cfeild
         self.xlim,self.ylim,self.nlim = eq['xlim'],eq['ylim'],eq['nlim']
-        if 'SF' in conf.config:
-            self.rcirc,self.drcirc = 1.25,0.25
-        elif conf.config == 'X':
+        
+        if 'SF' in config:
+            self.rcirc,self.drcirc = 1.5,0.5
+        elif config == 'X':
             self.rcirc,self.drcirc = 1.25,0.25
         else:
             self.rcirc,self.drcirc = 0.5,0.25
-        #self.conf.TF(self)
+        '''
+        theta = np.linspace(-np.pi,np.pi,100)
+        r = (self.rcirc-self.drcirc/2)*np.cos(theta)
+        z = (self.rcirc-self.drcirc/2)*np.sin(theta)
+        pl.plot(r+self.Xpoint[0],z+self.Xpoint[1],'--')
+        r = (self.rcirc+self.drcirc/2)*np.cos(theta)
+        z = (self.rcirc+self.drcirc/2)*np.sin(theta)
+        pl.plot(r+self.Xpoint[0],z+self.Xpoint[1],'--')
+        print(self.rcirc,self.drcirc)
+        '''    
+    def set_kwargs(self,kwargs):
+        for key in kwargs:
+            setattr(self,key,kwargs[key])
             
+    def read_config(self,conf):
+        self.Nsol = conf.Nsol
+        self.dSOL = conf.dSOL
+        self.filename = conf.filename
+        self.dataname = conf.dataname
+              
     def normalise(self):
         if 'Fiesta' in self.eq['name'] or 'Nova' in self.eq['name']\
         or 'disr' in self.eq['name']:
@@ -63,14 +75,16 @@ class SF(object):
             i = np.argmin(abs(self.r-rmin))
             self.r = self.r[i:]
             self.psi = self.psi[i:,:]
-            
      
     def eqwrite(self,prefix='Nova',config=''):
-        if len(config) == 0: config = self.config
+        if len(config) > 0: 
+            name = prefix+'_'+config
+        else:
+            name = prefix
         nc,rc,zc,drc,dzc,Ic = self.unpack_coils()[:-1]
         psi_ff = np.linspace(0,1,self.nr)
         pad = np.zeros(self.nr)
-        eq = {'name':prefix+'_'+config,
+        eq = {'name':name,
               'nx':self.nr, 'ny':self.nz,  # Number of horizontal and vertical points
               'r':self.r, 'z':self.z,  # Location of the grid-points
               'rdim':self.r[-1]-self.r[0],  # Size of the domain in meters
@@ -100,7 +114,7 @@ class SF(object):
         psi_norm = np.linspace(0,1,self.nr)
         pprime = self.b_scale*self.Pprime(psi_norm)
         FFprime = self.b_scale*self.FFprime(psi_norm)
-        with open('../Data/'+self.conf.dataname+'_flux.txt','w') as f:
+        with open('../Data/'+self.dataname+'_flux.txt','w') as f:
             f.write('psi_norm\tp\' [Pa/(Weber/rad)]\tFF\' [(mT)^2/(Weber/rad)]\n')
             for psi,p_,FF_ in zip(psi_norm,pprime,FFprime):
                 f.write('{:1.4f}\t\t{:1.4f}\t\t{:1.4f}\n'.format(psi,p_,FF_))
@@ -146,17 +160,7 @@ class SF(object):
     def set_TF(self,eq):
         for key in ['rcentr','bcentr']: 
             setattr(self,key,eq[key])
-        
-    def set_plasma(self,eq,contour=False):
-        for key in ['r','z','psi']: 
-            if key in eq.keys():
-                setattr(self,key,eq[key])
-        self.trim_r()
-        self.space()
-        if contour:
-            self.get_Xpsi()
-            self.set_contour()  # calculate cfeild
-        
+  
     def length(self,R,Z,norm=True):
         L = np.append(0,np.cumsum(np.sqrt(np.diff(R)**2+np.diff(Z)**2)))
         if norm: L = L/L[-1]
@@ -178,15 +182,26 @@ class SF(object):
             if hasattr(self, attr):
                 delattr(self,attr)
         self.set_plasma(eq)
-        self.Bfeild()
         self.get_Xpsi()
         self.get_Mpsi()
         self.set_contour()  # calculate cfeild
         r,z = self.get_boundary()
         self.set_boundary(r,z)
-        self.get_sol_psi()  # re-calculate sol_psi
+        
+        #self.get_sol_psi()  # re-calculate sol_psi
+        
+    def set_plasma(self,eq,contour=False):
+        for key in ['r','z','psi']: 
+            if key in eq.keys():
+                setattr(self,key,eq[key])
+        self.trim_r()
+        self.space()       
+        self.Bfeild()
+        if contour:
+            self.get_Xpsi()
+            self.set_contour()  # calculate cfeild
   
-    def set_coils(self,eq):
+    def set_coils(self,eq,config):
         self.coil = {}
         if eq['ncoil'] > 0: 
             nC = count(0)
@@ -195,9 +210,9 @@ class SF(object):
                 name = 'Coil{:1.0f}'.format(next(nC))
                 self.coil[name] = {'r':r,'z':z,'dr':dr,'dz':dz,'I':I,
                                    'rc':np.sqrt(dr**2+dz**2)/2}
-                if self.conf.config is 'SN':
+                if config is 'SN':
                     if i==10: break
-                if self.conf.config is 'SF2':
+                if config is 'SF2':
                     if i==15: break
         
     def upsample(self,sample):
@@ -240,10 +255,19 @@ class SF(object):
             feild[i] = self.Bspline[i](point[0],point[1])[0]
         return feild
         
+    def minimum_feild(self,radius,theta):
+        R = radius*np.sin(theta)+self.Xpoint[0]
+        Z = radius*np.cos(theta)+self.Xpoint[1]
+        B = np.zeros(len(R))
+        for i,(r,z) in enumerate(zip(R,Z)):
+            feild = self.Bcoil((r,z))
+            B[i] = np.sqrt(feild[0]**2+feild[1]**2)
+        return np.argmin(B)
+    
     def Pcoil(self,point):
         if not hasattr(self, 'Pspline'):
             self.Pspline = RectBivariateSpline(self.r,self.z,self.psi)    
-        psi = self.Pspline(point[0],point[1])[0]
+        psi = self.Pspline.ev(point[0],point[1])
         return psi
         
     def contour(self,Nstd=1.5,Nlevel=31,Xnorm=True,lw=1,**kwargs):
@@ -284,6 +308,8 @@ class SF(object):
                 pindex=0 if self.inPlasma(r,z) else 1
                 pl.plot(r,z,linetype,linewidth=lw[pindex],
                         color=color,alpha=alpha[pindex])
+        pl.axis('equal')
+        pl.axis('off')
         return levels
         
     def inPlasma(self,R,Z,delta=0.2):
@@ -345,7 +371,7 @@ class SF(object):
                        options={'xtol': 1e-7, 'disp': False})  
         return res.x
             
-    def get_Xpsi(self, xo=None):
+    def get_Xpsi(self,xo=None):
         if xo is None:
             if hasattr(self,'xo'):
                 xo = self.xo
@@ -363,7 +389,7 @@ class SF(object):
         self.Xpoint = Xpoint[:,i]
         if i == 0: xo[1] *= -1  # re-flip
         return (self.Xpsi,self.Xpoint)
-        
+   
     def getM(self,mo=None):
         if mo is None:
             mo = self.mo
@@ -375,7 +401,7 @@ class SF(object):
         
     def get_Mpsi(self, mo=None):
         self.Mpoint = self.getM(mo=mo)
-        self.Mpsi = self.Pcoil(self.Mpoint)[0]
+        self.Mpsi = self.Pcoil(self.Mpoint)
         return (self.Mpsi,self.Mpoint)
         
     def remove_contour(self):
@@ -475,12 +501,11 @@ class SF(object):
         if dr > 0:
             self.dSOL = dr
         else:
-            dr = self.conf.dSOL
+            dr = self.dSOL
             self.dSOL = dr
-        print('recalc sol psi',self.Nsol,self.dSOL)   
+        print('calculating sol psi',self.Nsol,self.dSOL)   
         self.get_LFP()
-        self.Dsol = np.linspace(0,dr,self.Nsol)
-        #self.Dsol[0] = self.Dsol[1]/2
+        self.Dsol = np.linspace(1e-6,dr,self.Nsol)
         r = self.LFPr+self.Dsol
         z = self.LFPz*np.ones(len(r))
         self.sol_psi = np.zeros(len(r))
@@ -488,15 +513,14 @@ class SF(object):
             self.sol_psi[i] = self.Pcoil([rp,zp])
         
     def sol(self,dr=0,Nsol=0,plot=False,update=False):  # dr [m]
-        if update or not hasattr(self,'sol_psi') or dr > self.conf.dSOL\
+        if update or not hasattr(self,'sol_psi') or dr > self.dSOL\
         or Nsol > self.Nsol: 
             self.get_sol_psi(dr=dr,Nsol=Nsol)  # re-calculcate LFP
         elif (Nsol>0 and Nsol != self.Nsol) or \
         (dr>0 and dr != self.dSOL):  # update  
             if dr>0: self.dSOL = dr
             if Nsol>0: self.Nsol = Nsol
-            Dsol = np.linspace(0,self.conf.dSOL,self.Nsol)
-            #Dsol[0] = Dsol[1]/2
+            Dsol = np.linspace(1e-6,self.dSOL,self.Nsol)
             self.sol_psi = interp1(self.Dsol,self.sol_psi)(Dsol)
             self.Dsol = Dsol
         contours = self.get_contour(self.sol_psi)    
@@ -504,11 +528,13 @@ class SF(object):
                                                 Midplane=False,Plasma=False)
         self.get_legs()
         if plot:
-            color = sns.color_palette('Set2',4)
-            for c,leg in enumerate(self.conf.targets.keys()):
+            color = sns.color_palette('Set2',6)
+            for c,leg in enumerate(self.legs):
                 for i in np.arange(self.legs[leg]['i'])[::-1]:
                     r,z = self.snip(leg,i)
+                    r,z = self.legs[leg]['R'][i],self.legs[leg]['Z'][i]
                     pl.plot(r,z,color=color[c],linewidth=0.5)
+                    
                     
     def add_core(self):  # refarance from low-feild midplane
         for i in range(self.Nsol):
@@ -529,16 +555,6 @@ class SF(object):
             Z=Z[::-1]
         return R,Z
   
-    def trim_fw(self,R,Z):
-        r,z = R[0],Z[0]
-        r1,r2 = r[r>self.Xpoint[0]],r[r<=self.Xpoint[0]]
-        z1,z2 = z[r>self.Xpoint[0]],z[r<=self.Xpoint[0]]
-        arg1 = np.argmin((r1-self.Xpoint[0])**2+(z1-self.Xpoint[1])**2)
-        arg2 = np.argmin((r2-self.Xpoint[0])**2+(z2-self.Xpoint[1])**2)
-        r = np.append(r1[arg1:],r2[:arg2+1])
-        z = np.append(z1[arg1:],z2[:arg2+1])
-        return r,z
-
     def pick_contour(self,contours,Xpoint=False,Midplane=True,Plasma=False):
         Rs = []
         Zs = []
@@ -626,6 +642,7 @@ class SF(object):
                     
     def topolar(self,R,Z):
         x,y = R,Z
+        pl.plot(self.Xpoint[0],self.Xpoint[1],'o')
         r = np.sqrt((x-self.Xpoint[0])**2+(y-self.Xpoint[1])**2)
         t = np.arctan2(x-self.Xpoint[0],y-self.Xpoint[1])
         return r,t
@@ -633,7 +650,6 @@ class SF(object):
     def store_leg(self,rloop,tloop):
         if np.argmin(rloop) > len(rloop)/2:  # point legs out
             rloop,tloop = rloop[::-1],tloop[::-1]
-
         ncirc = np.argmin(abs(rloop-self.rcirc))
         tID = np.argmin(abs(tloop[ncirc]-self.tleg))
         legID = self.tID[tID]
@@ -662,7 +678,7 @@ class SF(object):
         if label:
             i = self.legs[label]['i']
             R = rloop*np.sin(tloop)+self.Xpoint[0]
-            Z = rloop*np.cos(tloop)+self.Xpoint[1]  
+            Z = rloop*np.cos(tloop)+self.Xpoint[1] 
             if i > 0:
                 if R[0]**2+Z[0]**2 == (self.legs[label]['R'][i-1][0]**2+
                                        self.legs[label]['Z'][i-1][0]**2):
@@ -672,7 +688,7 @@ class SF(object):
             self.legs[label]['R'][i] = R
             self.legs[label]['Z'][i] = Z
             self.legs[label]['i'] = i+1
-            
+
     def min_L2D(self,targets):
         L2D = np.zeros(len(targets.keys()))
         for i,target in enumerate(targets.keys()):
@@ -682,6 +698,7 @@ class SF(object):
     def get_legs(self):
         self.tleg = np.array([])
         for N in range(len(self.Rsol)):
+            #pl.plot(self.Rsol[N],self.Zsol[N])
             r,t = self.topolar(self.Rsol[N],self.Zsol[N])
             index = (r>self.rcirc-self.drcirc/2) & (r<self.rcirc+self.drcirc/2)
             self.tleg = np.append(self.tleg,t[index])
@@ -735,11 +752,12 @@ class SF(object):
 
         self.tleg = np.append(-np.pi-(np.pi-self.tleg[-1]),self.tleg)
         self.tleg = np.append(self.tleg,np.pi+(np.pi+self.tleg[1]))
-        
-        for N in range(len(self.Rsol)):  # range(self.Nsol)
+
+        for N in range(len(self.Rsol)):  
             ends,ro = [0,-1],np.zeros(2)
             for i in ends:
                 ro[i] = np.sqrt(self.Rsol[N][i]**2+self.Zsol[N][i]**2)
+            '''
             if ro[0] == ro[1]:
                 r,z = self.clock(self.Rsol[N],self.Zsol[N],anti=True)
                 self.Rsol[N],self.Zsol[N] = r,z
@@ -747,7 +765,7 @@ class SF(object):
                 r,z = self.Rsol[N],self.Zsol[N]
                 self.Rsol[N] = np.append(r[ncut:],r[:ncut])
                 self.Zsol[N] = np.append(z[ncut:],z[:ncut])
-
+            '''
             r,t = self.topolar(self.Rsol[N],self.Zsol[N])
             post = False
             rpost,tpost = 0,0
@@ -770,14 +788,15 @@ class SF(object):
                 elif np.max(r)>self.rcirc:
                     ncut = np.arange(len(r))[r>self.rcirc][0]
                     rin,tin = r[:ncut],t[:ncut] 
-                    nx = np.argmin(rin)
+                    #nx = np.argmin(rin)  # proximity to Xpoint
+                    nx = self.minimum_feild(rin,tin)  # minimum feild
                     rpre,tpre = rin[:nx+1],tin[:nx+1]
                     rpost,tpost = rin[nx:],tin[nx:]
                     loop = True
                     post = True
                     rloop,tloop = np.append(rloop,rpre),np.append(tloop,tpre)
                 if loop:                     
-                    if rloop[0]<self.rcirc and rloop[-1] < self.rcirc:
+                    if rloop[0] < self.rcirc and rloop[-1] < self.rcirc:
                         if np.min(rloop*np.cos(tloop)) > self.drcirc-self.rcirc:
                             nmax = np.argmax(rloop*np.sin(tloop))  # LF 
                         else:
@@ -785,7 +804,7 @@ class SF(object):
                         self.store_leg(rloop[:nmax],tloop[:nmax])
                         self.store_leg(rloop[nmax:],tloop[nmax:])
                     else:
-                        self.store_leg(rloop,tloop)       
+                        self.store_leg(rloop,tloop)  
                 if ncut == -1:
                     r,t = [],[]
                 else:
@@ -802,15 +821,15 @@ class SF(object):
     def cross_legs(self,leg,layer_index):
         Rsol = self.legs[leg]['R'][layer_index]
         Zsol = self.legs[leg]['Z'][layer_index] 
-        return  self.Xtrim(Rsol,Zsol)
+        return  Rsol,Zsol
 
     def snip(self,leg,layer_index=0,L2D=0):
-        if not hasattr(self,'Rsol') or L2D != 0:
+        if not hasattr(self,'Rsol'):
             self.sol()
-        if L2D == 0:
-            L2D = self.conf.targets[leg]['L2D'][-1]
         Rsol,Zsol = self.cross_legs(leg,layer_index)
         Lsol = self.length(Rsol,Zsol,norm=False)
+        if L2D == 0:
+            L2D = Lsol[-1]
         if layer_index != 0:
             Rsolo,Zsolo = self.cross_legs(leg,0)
             Lsolo = self.length(Rsolo,Zsolo,norm=False)
@@ -824,15 +843,7 @@ class SF(object):
         Rsol,Zsol = Rsol[:index],Zsol[:index]  # trim to strike point
         Rsol,Zsol = np.append(Rsol,Rend),np.append(Zsol,Zend)
         return (Rsol,Zsol)
-        
-    def trim_legs(self):
-        for leg in self.legs.keys():
-            for layer_index in range(self.legs[leg]['i']):
-                if 'core' not in leg:
-                    R,Z = self.snip(leg,layer_index)
-                    self.legs[leg]['R'][layer_index] = R
-                    self.legs[leg]['Z'][layer_index] = Z
-    
+
     def pick_leg(self,leg,layer_index):
         R = self.legs[leg]['R'][layer_index]
         Z = self.legs[leg]['Z'][layer_index]
@@ -878,9 +889,9 @@ class SF(object):
             Xi = np.append(Xi,Bphi/Bp)  # feild expansion
         return Xi
         
-    def connection(self,leg,layer_index,snip=False):
-        if snip:  # trim targets to L2D
-            Rsol,Zsol = self.snip(leg,layer_index)  
+    def connection(self,leg,layer_index,L2D=0):
+        if L2D > 0:  # trim targets to L2D
+            Rsol,Zsol = self.snip(leg,layer_index,L2D)  
         else:  # rb.trim_sol to trim to targets
             Rsol = self.legs[leg]['R'][layer_index]
             Zsol = self.legs[leg]['Z'][layer_index] 

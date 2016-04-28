@@ -39,15 +39,17 @@ class EQ(object):
         #self.grid()  # copy solution grid
         self.r,self.z = self.sf.r,self.sf.z 
         self.r2d,self.z2d = self.sf.r2d,self.sf.z2d    
-        self.dr,self.dz = self.sf.dr,self.sf.dz
+        self.dr,self.dz,self.dA = self.sf.dr,self.sf.dz,self.sf.dr*self.sf.dz
         self.psi = self.sf.psi  # copy psi
         self.GSoper()  # apply GS opperator to psi
+        #self.GS = self.convolve(self.GS,sigma=sigma)  # pre interpolation filter
         GSspline = RBS(self.r,self.z,self.GS)  # construct spline interpolator
         self.grid(**kwargs)  # update solution grid
         self.GS = GSspline.ev(self.r2d,self.z2d)  # interpolate b
-        self.sparseBC(sigma=sigma)  # filter b / set core
+        self.GS = self.convolve(self.GS,sigma=sigma)  # post interpolation filter
+        self.b = np.copy(np.reshape(self.GS,self.nr*self.nz))  # set core
         self.edgeBC(update=False)  # set edge
-        self.psi = self.solve()
+        self.psi = self.solve()  # re-solve
         self.set_eq_psi()  # pass grid and psi back to sf
 
     def limits(self,boundary):
@@ -408,10 +410,10 @@ class EQ(object):
             
     def set_eq_psi(self):  # set psi from eq
         eq = {'r':self.r,'z':self.z,'psi':self.psi}
-        try:
-            self.sf.update_plasma(eq)  # include boundary update
-        except:
-            self.sf.set_plasma(eq,contour=True)
+        #try:
+        #    self.sf.update_plasma(eq)  # include boundary update
+        #except:
+        self.sf.set_plasma(eq,contour=True)
     
     def plasma(self):
         self.resetBC()
@@ -465,7 +467,7 @@ class EQ(object):
             print(self.sf.Mpoint[1])
             
     def GSoper(self):  # apply GS operator
-        edge_order = 1
+        edge_order = 2
         dpsi = np.gradient(self.psi,edge_order=edge_order)
         dpsi_r,dpsi_z = dpsi[0]/self.dr,dpsi[1]/self.dz
         GSr = self.r2d*np.gradient(dpsi_r/self.r2d,edge_order=edge_order)[0]/self.dr
@@ -612,9 +614,9 @@ class EQ(object):
         c.set_xlabel(r'$j$ MAm$^{-1}$')
         
     def plotj(self,sigma=0):
-        self.GSoper()
+        #self.GSoper()
         j = self.getj(sigma=sigma)
-        self.plot_matrix(j,scale=1e-6)
+        self.plot_matrix(j,scale=1e-6,trim=False)
         
         
     def plot_matrix(self,m,midpoint=0,scale=1,trim=True):
@@ -624,7 +626,7 @@ class EQ(object):
         else:
             rlim,zlim = [self.r[0],self.r[-1]],[self.z[0],self.z[-1]]
         cmap = pl.get_cmap('RdBu_r')
-        caxis = np.round([scale*m.min(),scale*m.max()],decimals=2)
+        caxis = np.round([scale*m.min(),scale*m.max()],decimals=3)
         norm = MidpointNormalize(midpoint=midpoint,vmin=caxis[0],vmax=caxis[1])
         pl.imshow(scale*m.T,cmap=cmap,norm=norm,
                   extent=[rlim[0],rlim[-1],zlim[0],zlim[-1]],

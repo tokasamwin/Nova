@@ -1,7 +1,8 @@
 import pylab as pl
 import numpy as np
 from itertools import cycle
-from eqConfig import Config
+from eqconfig import eqsetup
+
 from radial_build import RB
 from streamfunction import SF
 from elliptic import EQ
@@ -9,7 +10,8 @@ from scipy.interpolate import InterpolatedUnivariateSpline as IUS
 from addtext import linelabel
 import time
 from inverse import INV
-import cross_coil as cc
+
+conf = eqsetup('SX')
 
 #from elliptic import grid
 #import cross_coil as cc
@@ -32,9 +34,9 @@ pl.axis('off')
 
 
 conf = Config(config)
-sf = SF(conf,Nova=False)
+sf = SF(conf,sample=4,Nova=False)
 sf.contour()
-#eq = EQ(sf,sigma=0.2,limit=[5.5,12,-8,5],n=1e4)  # resample
+#eq = EQ(sf,sigma=0,limit=[5.5,12,-8,5],n=5e4)  # resample
 #eq.plotj()
 
 #
@@ -42,15 +44,33 @@ conf.TF(sf)
 rb = RB(conf,sf,Np=250)
 rb.divertor_outline(True,plot=True,debug=False)
 
+leg = 'outer'
+if config == 'SN':
+    filename = '2015_First_Wall_and_Divertor_CCFE_2MGVE7_v1_0.txt'  # SN
+elif config[:2] == 'SF':
+    filename = '2015_First_Wall_and_Divertor_CCFE_2MDBJ9_v1_0.txt'  # SF
+    leg += '1'
+elif config[:2] == 'SX':
+    filename = '2015_First_Wall_and_Divertor_CCFE_2MKUGH_v1_0.txt'
+    filename = 'SX7_bdry_19_10.txt'
+    #filename = 'SX8_bdry_18_11.txt'
+    #filename = 'SX8_bdry_final_email.txt'
 
-#filename = '2015_First_Wall_and_Divertor_CCFE_2MGVE7_v1_0.txt'
-filename = '2015_First_Wall_and_Divertor_CCFE_2MKUGH_v1_0.txt'
-filename = 'SX_bdry.txt'
+filename = config+'_old_bdry.txt'
+#filename = '2015_First_Wall_and_Divertor_CCFE_2MKUGH_v1_0.txt'
 with open('../Data/'+filename) as f:
-    for i in range(5):    
+    for i in range(2):    
         f.readline()
-    outer = f.readline().split()
-    ro,zo = float(outer[3]),float(outer[4])
+    if len(f.readline().split()) > 0:
+        f.readline()    
+    f.readline()
+    if f.readline().split()[0] == 'inner1':
+        nskip = 3
+    else:
+        nskip = 1
+    for i in range(nskip):    
+        f.readline()
+
     for i in range(3):    
         f.readline()
     n = int(f.readline())
@@ -61,8 +81,11 @@ with open('../Data/'+filename) as f:
             r[i],z[i] = data[0],data[1]
         else:
             r[i],z[i] = data[0],data[2]
-pl.plot(r,z,'-')
-pl.plot(ro,zo,'o')
+#pl.plot(r,z,'-')
+
+l = rb.length(r,z)
+index = np.append(np.diff(l)!=0,True)
+r,z = r[index],z[index]
 
 rb.Rb,rb.Zb = r,z
 
@@ -70,7 +93,7 @@ rb.Rb,rb.Zb = r,z
 
 rb.trim_sol(plot=True)
 
-leg = 'outer'
+
 Rt,Zt = rb.Rb,rb.Zb  # rb.targets[leg]['R'], rb.targets[leg]['Z']
 n = rb.normal(Rt,Zt)
 T = np.dot(np.matrix([[0,-1],[1,0]]),n)
