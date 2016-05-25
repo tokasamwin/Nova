@@ -1,4 +1,5 @@
 import pylab as pl
+from config import Setup
 from streamfunction import SF
 from radial_build import RB
 from elliptic import EQ
@@ -13,24 +14,39 @@ sns.set(context='talk',style='white',font='sans-serif',palette='Set2',
 pl.clf()
 
 
-filename = 'Equil_AR3d1_16coils_SFminus_v4_2015_09_bt_1d03li_0d8_Ipl_20d25_SOF.eqdsk'
-#filename = 'Equil_AR3d1_16coils_v3_bt_1d03li_0d8_Ipl_20d25_XDext_v4_NOEDDY_SOF_FINAL3_v1.eqdsk'
-sf = SF(filename,config='X',dSOL=3e-3,Nsol=51)
-sf.get_sol_psi()
+setup = Setup('SN')
+sf = SF(setup.filename)
+rb = RB(setup,sf)
 
-rb = RB(sf,Np=250)
+sf.contour()
 
-
-
-
-
-eq = EQ(sf,sigma=0,limit=[6,10,-7,-3],n=1e4)  # resample
+#eq = EQ(sf,sigma=0,limit=[6,10,-7,-3],n=1e3)  # resample
+#sf.plot_coils(next(Color),coils=eq.coil,label=False,plasma=False) 
 
 
 
-eq.plotj()
-
-levels = sf.contour()
+sf.plot_coils(coils=sf.coil,label=True,plasma=False,current=False) 
 
 
-sf.sol(plot=True)
+rb.firstwall(calc=True,plot=True,debug=False)
+rb.vessel()
+rb.TFcoil(False)
+rb.trim_sol(plot=True)
+
+'''
+
+
+sf.contour()
+sf.sol()
+
+
+
+
+rb.trim_sol(plot=True)
+
+pl.axis('equal')
+
+
+#eq.plotj()
+'''
+

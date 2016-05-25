@@ -1,206 +1,148 @@
-import pylab as pl
 import numpy as np
-import shelve
-from scipy.interpolate import interp1d
+import collections
 
-class layout(object):
+class Setup(object):
     
-    def __init__(self, geom):
-        self.geom = geom
-        self.coil_keys = geom.coil.keys()
-        self.flip = 1
-        
-    def set_keys(self,keys):
-        self.coil_keys = keys
-        
-    def get_keys(self,keys):
-        self.coil_keys = self.geom.coil.keys()
-        
-    def plasma_coils(self):
-        coil = self.geom.coil
-        for name in self.coil_keys:
-            if 'plasma' in name:
-                pl.plot(self.flip*coil[name]['r'], coil[name]['z'], 'bx')
-        
-    def sol(self):
-        plasma = self.geom.plasma
-        pl.plot(self.flip*plasma['sol']['r'], plasma['sol']['z'], 'r-', linewidth=2)
+    def __init__(self,configuration=''):
+        self.configuration = configuration
+        self.set_defaults()
+        self.update(configuration)
+        self.backfill()
 
+    def set_defaults(self):
+        self.filename = ''
+        self.dataname = ''
+        self.targets = collections.OrderedDict()  # targets structure (ordered)
+        self.targets['default'] = {}
+        self.targets['default']['L2D'] = 2
+        self.targets['default']['open'] = False
+        self.targets['default']['graze'] = 1.5*np.pi/180
+        self.targets['default']['dPlate'] = 0.5
+        self.targets['default']['dR'] = 0
+        self.firstwall = {}  # initalise firstwall data structure
+        self.firstwall['dRfw'] = 0.25
+        self.firstwall['div_ex'] = 0.18
+        self.firstwall['trim'] = [0.75,0.7]
+        self.build = {}  # initalise build data structure
+        self.build['tfw'] = 0.1  # first wall thickness
+        self.build['tBBsupport'] = 0.1  # blanket support
+        self.build['BS'] = np.array([0.78-0.2,1.304-0.2])  # blanket+sheild #PMI
+        self.build['BS'] -= (self.build['tfw']+self.build['tBBsupport'])
+        BBfrac = np.array([1,1])
+        self.build['BB'] = list(BBfrac*self.build['BS'])  # blanket (in/out) 
+        self.build['sheild'] = list((1-BBfrac)*self.build['BS'])  # sheilding
+        self.build['sheild_connect']=[0,1]
+        self.build['Dsheild'] =[]  # wrap sheild around divertor [0,1] 
+        self.build['sheild_base'] = -1  # if Dsheild [], base gap divertor-sheild
+        self.build['VV'] = [0.587,1.2]  # vacumn vessel thickness (in/out)
+        self.TF = {}
+        self.TF['opp'] = 'L'  # L==length, V==volume
+        self.coils = {'internal':{'id':[],'dR':[],'dZ':[]},  # coils structure
+                      'external':{'id':[],'dR':[],'dZ':[]}}
         
-    def P6_support(self, coil):
-        data = shelve.open(self.path+self.file+'_'+'sol')
-        r_sol = data['data-1'][:,0]
-        z_sol = data['data-1'][:,1]
-        data.close()
-        
-        # upper pinch
-        r = [r for r,z in zip(r_sol,z_sol) if r>9 and z>-7.5]
-        z = [z for r,z in zip(r_sol,z_sol) if r>9 and z>-7.5]
-        ind = z.index(min(z))
-        r_min = r[ind]
-        z_min = z[ind]
-        
-        # lower pinch
-        r = [r for r,z in zip(r_sol,z_sol) if r>9 and z<-7.5]
-        z = [z for r,z in zip(r_sol,z_sol) if r>9 and z<-7.5]
-        ind = z.index(max(z))
-        r_max = r[ind]
-        z_max = z[ind]
-        
-        Lpinch = 0.9*(z_max-z_min)
-        
-        r = np.mean([r_min,r_max])
-        z = np.mean([z_min,z_max])
-
-        pl.plot(self.flip*r,z_min, 'rx')
-        pl.plot(self.flip*r,z_max, 'rx')
-        pl.plot(self.flip*r,z, 'ko')
-        
-        pl.plot(self.flip*[r,coil['P6']['r']],[z,coil['P6']['z']], 'k-')
-        
-    def plates(self):
-        structure = self.geom.structure
-        key = ['divertorL', 'divertorU']
-        for k in key:
-            if k in structure.keys():
-                pl.plot(self.flip*structure[k]['r'], structure[k]['z'], 'go-')
+    def backfill(self):
+        for key in list(self.targets)[1:]:  # backfill defaults
+            for default in list(self.targets['default']):
+                if default not in self.targets[key]:
+                    self.targets[key][default] = self.targets['default'][default]
     
-    def radial_cord(self, r_in, z_in):
-        cylin = {}        
-        r = ((r_in-self.geom.rc)**2+(z_in-self.geom.zc)**2)**0.5
-        theta = np.arctan2(z_in-self.geom.zc, r_in-self.geom.rc)
-        theta = np.unwrap(theta)
-        index = theta.argsort()
-        r,theta = r[index],theta[index]                   
-        theta_i = np.linspace(np.min(theta), np.max(theta), 100)
-        fr_i = interp1d(theta, r, kind='linear')
-        r_i = fr_i(theta_i)
-        cylin['r'] = self.geom.rc+r_i*np.cos(theta_i)
-        cylin['z'] = self.geom.zc+r_i*np.sin(theta_i)
-        cylin['r'] = np.append(cylin['r'], cylin['r'][0])
-        cylin['z'] = np.append(cylin['z'], cylin['z'][0])
-        
-        return cylin
+    def update(self,configuration):  # update 
+        self.configuration = configuration
+        if configuration == 'SFm':
+            self.dataname = 'SFm'
+            self.filename = '../eqdsk/Equil_AR3d1_16coils_SFminus_v4_2015'+\
+            '_09_bt_1d03li_0d8_Ipl_20d25_SOF.eqdsk'
+            #self.filename = '../eqdsk/2015_SFminus_eqdsk_2MCQRZ_v1_0_IDM.eqdsk'
+            self.targets['default']['dPlate'] = 0.35 # target plate length
+            self.targets['inner1'] = {'L2D':[1.1+0.52],'open':True,'dR':0}
+            self.targets['inner2'] = {'L2D':[1.2-0.08],'open':False,'dR':-1}
+            self.targets['outer1'] = {'L2D':[1.65-0.7],'open':False,'dR':-1}
+            self.targets['outer2'] = {'L2D':[1.1+0.15],'open':True,'dR':0}  
+            self.firstwall['div_ex'] = 0.18
+            self.firstwall['trim'] = [0.75,0.7]  # trim fraction (in/out)
+            self.coils['external']['id'] = list(range(0,16))  # all external
+            self.TF['opp'] = 'L'
             
-    def TF(self):
-        structure = self.geom.structure
-        key = ['TFin', 'TFout']
-        cylin = {}
-        for k in key:  
-            cylin[k] = {}
-            cylin[k] = self.radial_cord(structure[k]['r'], structure[k]['z'])
-            pl.plot(self.flip*cylin[k]['r'], cylin[k]['z'], 'k-')
- 
-        for i in range(len(cylin['TFin']['r'])-1):
-            r_fill = [cylin['TFin']['r'][i], cylin['TFout']['r'][i], 
-                      cylin['TFout']['r'][i+1], cylin['TFin']['r'][i+1]]
-            z_fill = [cylin['TFin']['z'][i], cylin['TFout']['z'][i], 
-                      cylin['TFout']['z'][i+1], cylin['TFin']['z'][i+1]]          
-            pl.fill(r_fill,z_fill,facecolor='b',alpha=0.1, edgecolor='none')
-    
-    def FW(self):
-        fw = self.geom.fw
-        structure = self.geom.structure
-        cylin_fw = self.radial_cord(fw['r'], fw['z'])
-        cylin_tf = self.radial_cord(structure['TFin']['r'], structure['TFin']['z'])
+        elif configuration == 'SFp':
+            self.dataname = 'SFp'
+            self.filename = '../eqdsk/Equil_AR3d1_16coils_SFplus_v4_2015'+\
+            '_09_bt_1d03li_0d8_Ipl_20d25_SOF.eqdsk'
+            self.targets['default']['dPlate'] = 0.35 # target plate length
+            self.targets['inner1'] = {'L2D':[1.1],'open':True,'dR':0.1}
+            self.targets['inner2'] = {'L2D':[1.2],'open':False,'dR':-1}
+            self.targets['outer1'] = {'L2D':[1.65],'open':False,'dR':-1}
+            self.targets['outer2'] = {'L2D':[1.1],'open':True,'dR':0.1}  
+            self.firstwall['div_ex'] = 0.18
+            self.firstwall['trim'] = [0.75,0.7]  # trim fraction (in/out)
+            self.build['sheild_connect'] = [0.22,1]
+            self.TF['opp'] = 'L'
+            self.coils['external']['id'] = list(range(0,10)) 
+            
+        if configuration == 'SX':
+            self.dataname = 'SX8'
+            self.filename = '../eqdsk/Equil_AR3d1_16coils_bt_1d03li_0d8_I'
+            self.filename += 'pl_20d25_SX_on_SFgeom_NOEDDY_EOF_fine_iter5_v3.eqdsk'
+            #self.filename = '../eqdsk/Equil_AR3d1_16coils_bt_1d03li_0d8_I'
+            #self.filename += 'pl_20d25_SX_on_SFgeom_NOEDDY_EOF_fine_iter5_v3_new.eqdsk'
+            self.filename = '../eqdsk/2015_SX_ext_coils_eqdk_2MK6XX_v1_0.eqdsk'  # IDM
+            #self.filename = '../eqdsk/Equil_AR3d1_16coils_bt_1d03li_0d8_Ipl_'
+            #self.filename += '20d25_SX_on_SFgeom_NOEDDY_EOF_fine_iter3_v5_old.eqdsk'
+            self.targets['inner'] = {'L2D':[1.1]}
+            self.targets['outer'] = {'L2D':[3.55]} 
+            self.firstwall['div_ex'] = 1
+            self.firstwall['trim'] = [0.71,0.74]  # trim fraction (in/out)
+            self.build['sheild_connect'] = [0.15,0.9]
+            self.coils['external']['id'] = list(range(10,16)) 
+        
+        elif configuration == 'SXex':
+            self.dataname = 'SXex'
+            self.filename = '../eqdsk/SXex.eqdsk'
+            self.targets['inner'] = {'L2D':[1.1]}
+            self.targets['outer'] = {'L2D':[3.55]} 
+            self.firstwall['div_ex'] = 1.3
+            self.firstwall['trim'] = [0.63,0.68]  # trim fraction (in/out)
+            self.build['sheild_connect'] = [0.2,0.9]
+            self.build['sheild_base'] = 0
+            self.targets['inner'] = {'L2D':[1.0],'dR':0.15,'dPlate':0.25}
+            self.targets['outer'] = {'L2D':[5.615],'dPlate':1.0}
+                
+        elif configuration == 'X':
+            self.dataname = 'X'
+            self.filename = '../eqdsk/Equil_AR3d1_16coils_v3_bt_1d03li_'
+            self.filename += '0d8_Ipl_20d25_XDext_v4_NOEDDY_SOF_FINAL3_v1.eqdsk'
+            self.targets['default']['dPlate'] = 0.2  # target plate length
+            self.targets['inner'] = {'L2D':[1.1]}
+            self.targets['outer'] = {'L2D':[3.55]} 
+            self.firstwall['div_ex'] = 0.2
+            self.firstwall['trim'] = [0.81,0.81]  # trim fraction (in/out)
+            self.coils['external']['id'] = list(range(10,16)) 
+            self.targets['inner'] = {'L2D':0.95,'dR':-1}
+            self.targets['outer'] = {'L2D':1.92,'graze':1.0*np.pi/180}
 
-        for i in range(len(cylin_fw['r'])-1):
-            r_fill = [cylin_fw['r'][i], cylin_tf['r'][i], 
-                      cylin_tf['r'][i+1], cylin_fw['r'][i+1]]
-            z_fill = [cylin_fw['z'][i], cylin_tf['z'][i], 
-                      cylin_tf['z'][i+1], cylin_fw['z'][i+1]]          
-            pl.fill(r_fill,z_fill,facecolor='b',alpha=0.2, edgecolor='none')            
-            
-        pl.plot(self.flip*cylin_fw['r'], cylin_fw['z'], 'k-.')
-            
-    def plasma(self):
-        rc, zc = self.geom.rc, self.geom.zc
-        r,z = [],[]
-        pl.plot(self.flip*rc, zc, 'go')
-        for radius,theta in zip(self.geom.radius, self.geom.theta):
-            r.append(rc+radius*np.cos(theta))
-            z.append(zc+radius*np.sin(theta))
-        pl.plot(self.flip*r, z, 'r--')
         
-    def coil_fill(self):
-        fig = pl.gcf()
-        coil = self.geom.coil
-        for name in self.coil_keys:
-            if 'plasma' not in name:
-                if coil[name]['I'] == 0:
-                    color = 'k'
-                elif coil[name]['I'] > 0:
-                    color = 'r'
-                else:
-                    color = 'b'    
-                circle=pl.Circle((self.flip*coil[name]['r'],
-                                  coil[name]['z']),coil[name]['rc'],
-                                 color=color)
-                fig.gca().add_artist(circle)
-            
-    def coil_circ(self):
-        coil = self.geom.coil
-        theta = np.linspace(0,2*np.pi)
-        for name in self.coil_keys:
-            #pl.plot(self.flip*coil[name]['r'], coil[name]['z'], 'rx')  # coil centers
-            x_circ = coil[name]['rc']*np.cos(theta)
-            y_circ = coil[name]['rc']*np.sin(theta)
-            if coil[name]['I'] > 0:
-                line = 'r-'
-            else:
-                line = 'b-'
-            pl.plot(self.flip*coil[name]['r']+x_circ, coil[name]['z']+y_circ, line) 
-    
-    def coil_sheild(self):
-        coil = self.geom.coil
-        theta = np.linspace(0,2*np.pi)
-        for name in self.coil_keys: 
-            if 'plasma' not in name:
-                x_circ = (coil[name]['rc']+0.8)*np.cos(theta)
-                y_circ = (coil[name]['rc']+0.8)*np.sin(theta)
-                pl.plot(self.flip*coil[name]['r']+x_circ, coil[name]['z']+y_circ, 'k--') 
-        
-    def coil_label(self, coil_keys=[]):
-        coil = self.geom.coil
-        if not coil_keys:  # empty list
-          coil_keys = coil.keys()
-          
-        for name in self.coil_keys:
-            if 'plasma' not in name and name in coil_keys:
-                ax = pl.gca()
-                bbox_props = dict(boxstyle="round", fc="white", ec="k", lw=2)
-                ax.text(coil[name]['r']+coil[name]['rc']*np.cos(np.pi/4),
-                        coil[name]['z']+coil[name]['rc']*np.sin(np.pi/4), 
-                        '  '+name,
-                        horizontalalignment='left',verticalalignment='bottom',
-                        bbox=bbox_props)
-                        
-    def coil_current(self,xlim,zlim):
-        coil = self.geom.coil
-        for name in self.coil_keys:
-            if 'plasma' not in name and \
-            (coil[name]['r']>xlim[0] and coil[name]['r']<xlim[1]) and \
-            (coil[name]['z']>zlim[0] and coil[name]['z']<zlim[1]):
-                ax = pl.gca()
-                bbox_props = dict(boxstyle="round", fc="white", ec="y", lw=2)
-                ax.text(coil[name]['r'],coil[name]['z']-0.5, 
-                        '{:1.1f}'.format(coil[name]['I']/1e6)+'MA',
-                        horizontalalignment='center',verticalalignment='top',
-                        bbox=bbox_props)
-                        
-    def coil_force(self,xlim,zlim):
-        coil = self.geom.coil
-        for name in self.coil_keys:
-            if 'plasma' not in name and \
-            (coil[name]['r']>xlim[0] and coil[name]['r']<xlim[1]) and \
-            (coil[name]['z']>zlim[0] and coil[name]['z']<zlim[1]):
-                ax = pl.gca()
-                bbox_props = dict(boxstyle="round", fc="white", ec="g", lw=2)
-                ax.text(coil[name]['r'],coil[name]['z']+0.65, 
-                        '{:1.1f}'.format(coil[name]['Fz']/1e6)+'MN',
-                        horizontalalignment='center',verticalalignment='bottom',
-                        bbox=bbox_props)
-        
-        
+        elif configuration == 'Xic':
+            self.dataname = 'X'
+            self.filename = '../eqdsk/Equil_AR3d1_XD_2015_Invess_5d0MA_EOF_v2.eqdsk'
+            self.filename = '../eqdsk/2015_XD_eqdk_2MJ4JW_v2_1.eqdsk'
+            self.targets['default']['dPlate'] = 0.2  # target plate length
+            self.targets['inner'] = {'L2D':1.1,'dR':0}
+            self.targets['outer'] = {'L2D':2.44}
+            self.firstwall['div_ex'] = 0.6
+            self.firstwall['trim'] = [0.75,0.75]  # trim fraction (in/out)
+            self.build['sheild_connect'] = [0.1,1]
+            self.build['sheild_base'] = 0
+            self.coils['internal']['id'] = [11,12] 
+                                   
+        elif configuration == 'SN':
+            self.dataname = 'SND'
+            self.filename = '../eqdsk/2015_SN_eqdk_2MG9A4_v1_0.eqdsk'
+            self.filename = '../eqdsk/2015_SN_eqdk_2MG9A4_v1_0_IDM.eqdsk'
+            self.targets['inner'] = {'L2D':[1.1]}
+            self.targets['outer'] = {'L2D':[3.55]} 
+            self.firstwall['div_ex'] = 0.25
+            self.firstwall['trim'] = [0.88,0.95]  # trim fraction (in/out)
+            self.coils['external']['id'] = [0,4]
+            self.targets['inner'] = {'L2D':0.6}
+            self.targets['outer'] = {'L2D':0.65}
 
-
+                

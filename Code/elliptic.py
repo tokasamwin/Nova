@@ -27,22 +27,20 @@ class MidpointNormalize(Normalize):
 
 class EQ(object):
     
-    def __init__(self,sf,sigma=0.1,dCoil=0.25,**kwargs):
+    def __init__(self,sf,sigma=0.1,dCoil=0.5,**kwargs):
         self.mu_o = 4*np.pi*1e-7  # magnetic constant [Vs/Am]
         self.sf = sf
-        #self.coils(dCoil=dCoil)  # multi-filiment coils 
-        #self.get_Vcoil()  # identify vertical stability coils
+        self.coils(dCoil=dCoil)  # multi-filiment coils 
+        self.get_Vcoil()  # identify vertical stability coils
         if len(kwargs) > 0:
             self.resample(sigma=sigma,**kwargs)
         
     def resample(self,sigma=0.1,**kwargs):  # resample current density
-        #self.grid()  # copy solution grid
         self.r,self.z = self.sf.r,self.sf.z 
         self.r2d,self.z2d = self.sf.r2d,self.sf.z2d    
         self.dr,self.dz,self.dA = self.sf.dr,self.sf.dz,self.sf.dr*self.sf.dz
         self.psi = self.sf.psi  # copy psi
         self.GSoper()  # apply GS opperator to psi
-        #self.GS = self.convolve(self.GS,sigma=sigma)  # pre interpolation filter
         GSspline = RBS(self.r,self.z,self.GS)  # construct spline interpolator
         self.grid(**kwargs)  # update solution grid
         self.GS = GSspline.ev(self.r2d,self.z2d)  # interpolate b

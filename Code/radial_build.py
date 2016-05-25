@@ -6,36 +6,42 @@ from scipy.interpolate import interp1d as interp1
 from scipy.interpolate import UnivariateSpline as spline
 import scipy.optimize as op
 import seaborn as sns
+from itertools import cycle
 
 class RB(object):
     
-    def __init__(self,conf,sf,Np=800,flip=1):
+    def __init__(self,setup,sf,Np=500):
+        self.setup = setup
         self.sf = sf
-        self.TFwidth(sf)
-        self.conf = conf
-        self.targets = conf.targets
         self.Np = Np
-        self.flip = flip
+        self.dataname = setup.configuration+'_dev'
+        self.TFwidth(sf)
+
         if not hasattr (sf,'Xpoint'):
             sf.get_Xpsi()  
         self.xo = [sf.Xpoint[0],self.sf.eq['zmagx']]
         r,z = sf.get_boundary()
-        sf.set_boundary(r,z)
-        self.Rp,self.Zp = self.rzSLine(self.sf.rbdry,self.sf.zbdry)
-        self.Rp,self.Zp = self.theta_sort(self.Rp,self.Zp)
-        #pl.plot(self.sf.rbdry,self.sf.zbdry,'r-')          
+        sf.set_boundary(r,z,n=Np)
+        self.Rp,self.Zp = self.sf.rbdry,self.sf.zbdry
         self.Lp = self.length(self.Rp,self.Zp,norm=False)[-1]
-        self.Rfw,self.Zfw,self.psi_fw = self.first_wall(conf.dRfw) 
+        self.Rfw,self.Zfw,self.psi_fw = self.first_wall(self.setup.firstwall['dRfw']) 
         self.R,self.Z = self.Rfw,self.Zfw
-        #pl.plot(self.Rp,self.Zp,'b-')  
-     
+
+        
+    def set_target(self,leg,**kwargs):
+        if leg not in self.setup.targets:
+            self.setup.targets[leg] = {}
+        for key in self.setup.targets['default']:
+            if key in kwargs:
+                self.setup.targets[leg][key] = kwargs[key]  # update
+            elif key not in self.setup.targets[leg]:  #  prevent overwrite
+                self.setup.targets[leg][key] = self.setup.targets['default'][key]  # default
+   
     def theta_sort(self,R,Z,origin='lfs'):
         if origin == 'lfs':
             theta = np.arctan2(Z-self.xo[1],R-self.xo[0])
         elif origin == 'top':
             theta = np.arctan2(self.xo[0]-R,Z-self.xo[1])
-        #if theta[0] < theta[-1]:
-        #    R,Z = R[::-1],Z[::-1]
         index = np.argsort(theta)
         R,Z = R[index],Z[index]
         return R,Z
@@ -278,10 +284,10 @@ class RB(object):
             Zfill = np.array([Zin[i],Zout[i],Zout[i+1],Zin[i+1]])
             if flag is 0 and label is not None:
                 flag = 1
-                pl.fill(self.flip*Rfill,Zfill,facecolor=color,alpha=alpha,
+                pl.fill(Rfill,Zfill,facecolor=color,alpha=alpha,
                         edgecolor='none',label=label)
             else:
-                pl.fill(self.flip*Rfill,Zfill,facecolor=color,alpha=alpha,
+                pl.fill(Rfill,Zfill,facecolor=color,alpha=alpha,
                         edgecolor='none')
 
     def rotateB(self,B,theta):
@@ -291,17 +297,17 @@ class RB(object):
         Bhat = (R*np.matrix([[B[0]],[B[1]]])).getA1()/Bmag
         return Bhat
         
-    def divertor_outline(self,calculate,color=[0.5,0.5,0.5],
+    def firstwall(self,calc=True,color=[0.5,0.5,0.5],
                          plot=True,debug=False):
-        if calculate:
+        if calc:
             self.Rb,self.Zb = self.target_fill(debug=debug)
-            with open('../Data/'+self.conf.config+'_FW.pkl', 'wb') as output:
-                pickle.dump(self.targets,output,-1)
+            with open('../Data/'+self.dataname+'_FW.pkl', 'wb') as output:
+                pickle.dump(self.setup.targets,output,-1)
                 pickle.dump(self.Rb,output,-1)
                 pickle.dump(self.Zb,output,-1)
         else:
-            with open('../Data/'+self.conf.config+'_FW.pkl', 'rb') as input:
-                self.targets = pickle.load(input)
+            with open('../Data/'+self.dataname+'_FW.pkl', 'rb') as input:
+                self.setup.targets = pickle.load(input)
                 self.Rb = pickle.load(input)
                 self.Zb = pickle.load(input)
         #self.Rb,self.Zb = self.midplane_loop(self.Rb,self.Zb)  # clockwise LFS
@@ -309,7 +315,10 @@ class RB(object):
         self.sf.nlim = len(self.Rb)  # update sf
         self.sf.xlim,self.sf.ylim = self.Rb,self.Zb
         if plot:
-            pl.plot(self.Rb,self.Zb,'-',color=color,alpha=0.75,linewidth=1.25)
+            index = (self.Rb <= self.sf.r.max()) & (self.Rb >= self.sf.r.min()) &\
+            (self.Zb <= self.sf.z.max()) & (self.Zb >= self.sf.z.min())
+            pl.plot(self.Rb[index],self.Zb[index],
+                    '-',color=color,alpha=0.75,linewidth=1.25)
         
     def connect(self,psi,target_pair,ends,loop=[]):
         gap = []
@@ -319,26 +328,27 @@ class RB(object):
             psi_line = self.sf.get_contour([psi])[0]
             for line in psi_line:
                 r,z = line[:,0],line[:,1]
-                gap.append(np.min((self.targets[target_pair[0]]['R'][ends[0]]-r)**2+
-                          (self.targets[target_pair[0]]['Z'][ends[0]]-z)**2))
+                gap.append(np.min((self.setup.targets[target_pair[0]]['R'][ends[0]]-r)**2+
+                          (self.setup.targets[target_pair[0]]['Z'][ends[0]]-z)**2))
             select = np.argmin(gap)
             line = psi_line[select]
             r,z = line[:,0],line[:,1]
         index = np.zeros(2)
-        index[0] = np.argmin((self.targets[target_pair[0]]['R'][ends[0]]-r)**2+
-                 (self.targets[target_pair[0]]['Z'][ends[0]]-z)**2)
-        index[1] = np.argmin((self.targets[target_pair[1]]['R'][ends[1]]-r)**2+
-                 (self.targets[target_pair[1]]['Z'][ends[1]]-z)**2)
+        index[0] = np.argmin((self.setup.targets[target_pair[0]]['R'][ends[0]]-r)**2+
+                 (self.setup.targets[target_pair[0]]['Z'][ends[0]]-z)**2)
+        index[1] = np.argmin((self.setup.targets[target_pair[1]]['R'][ends[1]]-r)**2+
+                 (self.setup.targets[target_pair[1]]['Z'][ends[1]]-z)**2)
         if index[0]>index[1]:
             index = index[::-1]
         r,z = r[index[0]:index[1]+1],z[index[0]:index[1]+1] 
         return r,z
 
     def target_fill(self,debug=False,**kwargs):
-        layer_index = 0  # first open flux surface
+        layer_index = 0  # construct from first open flux surface
         self.sf.sol()
-        for leg in self.targets.keys():
-            Rsol,Zsol = self.sf.snip(leg,layer_index)
+        for leg in list(self.sf.legs)[2:]:
+            self.set_target(leg)
+            Rsol,Zsol = self.sf.snip(leg,layer_index,L2D=self.setup.targets[leg]['L2D'])
             Ro,Zo = Rsol[-1],Zsol[-1]
             
             Flip = [-1,1]
@@ -350,12 +360,11 @@ class RB(object):
                 psi_plasma = self.psi_fw[0]
 
             self.dpsi = self.psi_fw[1]-self.sf.Xpsi
-            Phi_target = [psi_plasma,
-                          self.sf.Xpsi-self.conf.div_ex*self.dpsi]  
+            Phi_target = [psi_plasma,self.sf.Xpsi-self.setup.firstwall['div_ex']*self.dpsi]  
             if leg is 'inner1' or leg is 'outer2':
-                Phi_target[0] = self.sf.Xpsi+self.conf.div_ex*self.dpsi
+                Phi_target[0] = self.sf.Xpsi+self.setup.firstwall['div_ex']*self.dpsi
 
-            if self.targets[leg]['open']:
+            if self.setup.targets[leg]['open']:
                 theta_sign = -1
                 Direction = Direction[::-1]
                 Theta_end = Theta_end[::-1]
@@ -367,58 +376,55 @@ class RB(object):
             if leg is 'inner1' or leg is 'outer2':
                 Theta_end = Theta_end[::-1]
 
-            self.targets[leg]['R'] = np.array([])
-            self.targets[leg]['Z'] = np.array([])
-            if 'dPlate' in self.targets[leg].keys():
-                dPlate = self.targets[leg]['dPlate']
-            else:
-                dPlate = self.conf.dPlate
+            self.setup.targets[leg]['R'] = np.array([])
+            self.setup.targets[leg]['Z'] = np.array([])
+            dPlate = self.setup.targets[leg]['dPlate']
             for flip,direction,theta_end,psi_target\
             in zip(Flip,Direction,Theta_end,Phi_target):
                 R,Z = self.match_psi(Ro,Zo,direction,theta_end,theta_sign,
-                                     psi_target,self.targets[leg]['graze'],
+                                     psi_target,self.setup.targets[leg]['graze'],
                                      dPlate,leg,debug=debug)
-                self.targets[leg]['R'] = np.append(self.targets[leg]['R'],R[::flip])
-                self.targets[leg]['Z'] = np.append(self.targets[leg]['Z'],Z[::flip])
+                self.setup.targets[leg]['R'] = np.append(self.setup.targets[leg]['R'],R[::flip])
+                self.setup.targets[leg]['Z'] = np.append(self.setup.targets[leg]['Z'],Z[::flip])
             if leg is 'outer':
-                self.targets[leg]['R'] = self.targets[leg]['R'][::-1]
-                self.targets[leg]['Z'] = self.targets[leg]['Z'][::-1]
+                self.setup.targets[leg]['R'] = self.setup.targets[leg]['R'][::-1]
+                self.setup.targets[leg]['Z'] = self.setup.targets[leg]['Z'][::-1]
         Rb,Zb = np.array([]),np.array([])
 
-        if 'SF' in self.conf.config:
-            Rb = np.append(Rb,self.targets['inner2']['R'][1:])
-            Zb = np.append(Zb,self.targets['inner2']['Z'][1:])
-            r,z = self.connect(self.sf.Xpsi-self.conf.div_ex*self.dpsi,
+        if self.sf.nleg == 6:  # SF
+            Rb = np.append(Rb,self.setup.targets['inner2']['R'][1:])
+            Zb = np.append(Zb,self.setup.targets['inner2']['Z'][1:])
+            r,z = self.connect(self.sf.Xpsi-self.setup.firstwall['div_ex']*self.dpsi,
                                ['inner2','inner1'],[-1,-1])
             Rb,Zb = self.append(Rb,Zb,r,z)
-            Rb = np.append(Rb,self.targets['inner1']['R'][::-1])
-            Zb = np.append(Zb,self.targets['inner1']['Z'][::-1])
-            r,z = self.connect(self.sf.Xpsi+self.conf.div_ex*self.dpsi,
+            Rb = np.append(Rb,self.setup.targets['inner1']['R'][::-1])
+            Zb = np.append(Zb,self.setup.targets['inner1']['Z'][::-1])
+            r,z = self.connect(self.sf.Xpsi+self.setup.firstwall['div_ex']*self.dpsi,
                                ['inner1','outer2'],[0,0])            
             Rb,Zb = self.append(Rb,Zb,r,z)
-            Rb = np.append(Rb,self.targets['outer2']['R'][1:])
-            Zb = np.append(Zb,self.targets['outer2']['Z'][1:])
-            r,z = self.connect(self.sf.Xpsi-self.conf.div_ex*self.dpsi,
+            Rb = np.append(Rb,self.setup.targets['outer2']['R'][1:])
+            Zb = np.append(Zb,self.setup.targets['outer2']['Z'][1:])
+            r,z = self.connect(self.sf.Xpsi-self.setup.firstwall['div_ex']*self.dpsi,
                                ['outer2','outer1'],[-1,-1])            
             Rb,Zb = self.append(Rb,Zb,r,z)
-            Rb = np.append(Rb,self.targets['outer1']['R'][::-1])
-            Zb = np.append(Zb,self.targets['outer1']['Z'][::-1])
+            Rb = np.append(Rb,self.setup.targets['outer1']['R'][::-1])
+            Zb = np.append(Zb,self.setup.targets['outer1']['Z'][::-1])
             r,z = self.connect(self.psi_fw[1],['outer1','inner2'],[0,0],
                                loop=(self.R[::-1],self.Z[::-1]))
             Rb,Zb = self.append(Rb,Zb,r,z)
         else:
-            Rb = np.append(Rb,self.targets['inner']['R'][1:])
-            Zb = np.append(Zb,self.targets['inner']['Z'][1:])
-            r,z = self.connect(self.sf.Xpsi-self.conf.div_ex*self.dpsi,
+            Rb = np.append(Rb,self.setup.targets['inner']['R'][1:])
+            Zb = np.append(Zb,self.setup.targets['inner']['Z'][1:])
+            r,z = self.connect(self.sf.Xpsi-self.setup.firstwall['div_ex']*self.dpsi,
                                ['inner','outer'],[-1,0])                
             Rb,Zb = self.append(Rb,Zb,r,z)
-            Rb = np.append(Rb,self.targets['outer']['R'][1:])
-            Zb = np.append(Zb,self.targets['outer']['Z'][1:])
+            Rb = np.append(Rb,self.setup.targets['outer']['R'][1:])
+            Zb = np.append(Zb,self.setup.targets['outer']['Z'][1:])
             r,z = self.connect(self.psi_fw[1],['outer','inner'],[-1,0],
                                loop=(self.R,self.Z))
             Rb,Zb = self.append(Rb,Zb,r,z)
         self.Rb,self.Zb = self.midplane_loop(Rb,Zb)
-        self.get_legs()  # trim to targets
+        self.get_sol()  # trim sol to targets and store values
         self.write_boundary(self.Rb,self.Zb)
         return self.Rb,self.Zb
         
@@ -429,24 +435,24 @@ class RB(object):
         if dr[1] < dr[0]:
             r,z = r[::-1],z[::-1]
         return np.append(R,r[1:-1]),np.append(Z,z[1:-1]) 
-
-    def get_legs(self):
+        
+    def get_sol(self):
         self.trim_sol(plot=False)
-        for leg in self.targets.keys():
+        for leg in list(self.sf.legs)[2:]:
             L2D,L3D,Rsol,Zsol = self.sf.connection(leg,0)
             Ro,Zo = Rsol[-1],Zsol[-1]
             L2Dedge,L3Dedge = self.sf.connection(leg,-1)[:2]
             Xi = self.sf.expansion([Ro],[Zo])
-            theta = self.sf.strike_point(Xi,self.targets[leg]['graze'])
-            self.targets[leg]['theta'] = theta
-            self.targets[leg]['L2Do'] = L2D
-            self.targets[leg]['L3Do'] = L3D
-            self.targets[leg]['L2Dedge'] = L2Dedge
-            self.targets[leg]['L3Dedge'] = L3Dedge
-            self.targets[leg]['Ro'] = Ro
-            self.targets[leg]['Zo'] = Zo 
-            self.targets[leg]['Rsol'] = Rsol
-            self.targets[leg]['Zsol'] = Zsol 
+            theta = self.sf.strike_point(Xi,self.setup.targets[leg]['graze'])
+            self.setup.targets[leg]['theta'] = theta
+            self.setup.targets[leg]['L2Do'] = L2D
+            self.setup.targets[leg]['L3Do'] = L3D
+            self.setup.targets[leg]['L2Dedge'] = L2Dedge
+            self.setup.targets[leg]['L3Dedge'] = L3Dedge
+            self.setup.targets[leg]['Ro'] = Ro
+            self.setup.targets[leg]['Zo'] = Zo 
+            self.setup.targets[leg]['Rsol'] = Rsol
+            self.setup.targets[leg]['Zsol'] = Zsol 
         
     def trim_sol(self,dr=0,Nsol=0,update=False,color='k',plot=True):
         self.sf.sol(dr=dr,Nsol=Nsol,update=update)
@@ -475,8 +481,8 @@ class RB(object):
     def trim_contour(self,Rb,Zb):
         Rt,Zt = np.array([]),np.array([])  # trim contour for BB
         Lnorm = self.length(self.R,self.Z,norm=False)[-1]
-        for flip,trim in zip([1,-1],[0.275*self.conf.trim[1],
-                              0.725*self.conf.trim[0]]):
+        for flip,trim in zip([1,-1],[0.275*self.setup.firstwall['trim'][1],
+                              0.725*self.setup.firstwall['trim'][0]]):
             L = self.length(Rb[::flip],Zb[::flip],norm=False)
             i = np.argmin(np.abs(L/Lnorm-trim))
             Rt = np.append(Rt,Rb[::flip][:i][::-flip])
@@ -495,7 +501,7 @@ class RB(object):
         
     def write_boundary_feild(self,Rb,Zb):
         Rb,Zb = Rb[::-1],Zb[::-1]  # flip boundary (clockwise)
-        with open('../Data/'+self.conf.dataname+'_bdry_feild.txt','w') as f:
+        with open('../Data/'+self.dataname+'_bdry_feild.txt','w') as f:
             f.write(self.conf.filename.split('/')[-1]+'\n')
             f.write('boundary clockwise from outboard midplane\n')
             f.write('r[m]\tz[m]\tBp[T]\tBphi[T]\n')
@@ -509,22 +515,16 @@ class RB(object):
                 f.write('{:1.4f}\t{:1.4f}\n'.format(Bp,Bphi))
         
     def write_boundary(self,Rb,Zb):
-        #Rb,Zb = self.rzSLine(Rb,Zb,s=0,Hres=True)
-        #Rb,Zb = self.rzSLine(Rb,Zb,s=2e-4,Np=558)
-        with open('../Data/'+self.conf.dataname+'_bdry.txt','w') as f:
-            f.write(self.conf.filename.split('/')[-1]+'\n')
-            if self.conf.conformal:
-                f.write('conformal boundary placed {:1.0f}'\
-                .format(1e3*self.conf.dRfw))
-                f.write('mm from LCFS at LFS\n')
-                f.write('connection calculated from Xpoint at ')
-                f.write('{:1.2f}mm from LFS\n\n'.format(1e3*self.sf.Dsol[-1]))
-            else:
-                f.write('constant offset boundary placed {:1.0f}'.format(66))
-                f.write('cm from LCFS\n\n')
+        with open('../Data/'+self.dataname+'_bdry.txt','w') as f:
+            f.write(self.sf.filename.split('/')[-1]+'\n')
+            f.write('boundary placed {:1.0f}'\
+            .format(1e3*self.setup.firstwall['dRfw']))
+            f.write('mm from LCFS at LFS, upper==constant offset, lower==feild line conformal\n')
+            f.write('connection calculated from Xpoint at ')
+            f.write('{:1.2f}mm from LFS\n\n'.format(1e3*self.sf.Dsol[-1]))
             f.write('target\tgraze[deg]\topen\tRo[m]\t\tZo[m]\t\tTo[deg]\tL2D[m]\tL3D[m]\n')
-            for leg in self.targets.keys():
-                target = self.targets[leg]
+            for leg in list(self.sf.legs)[2:]:
+                target = self.setup.targets[leg]
                 f.write(leg+'\t')
                 f.write('{:1.2f}\t\t'.format(target['graze']*180/np.pi))
                 if target['open']:
@@ -592,10 +592,10 @@ class RB(object):
     def match_psi(self,Ro,Zo,direction,theta_end,theta_sign,phi_target,graze,
                   dPlate,leg,debug=False):        
         color = sns.color_palette('Set2',2)
-        gain = 0.1  # 0.25
-        Nmax = 750
+        gain = 0.15  # 0.25
+        Nmax = 500
         Lo = [5,0.015]  # [blend,turn]  5,0.015
-        r2m = [-2,-1]  # ramp to step (+ive-lead, -ive-lag ramp==1, step==inf)
+        r2m = [-1.5,-1]  # ramp to step (+ive-lead, -ive-lag ramp==1, step==inf)
         Nplate = 1 # number of target plate divisions (1==flat)
         L = Lo[0] if theta_end == 0 else Lo[1]
         Lsead = L
@@ -605,7 +605,7 @@ class RB(object):
                                         theta_sign,graze,r2m,Nplate)
             L -= gain*(phi_target-phi)
             if debug: pl.plot(R,Z,color=color[0])
-            if np.abs(phi_target-phi) < 1e-5:
+            if np.abs(phi_target-phi) < 1e-4:
                 if debug: 
                     pl.plot(R,Z,'r',color=color[1])
                     print('rz',Ro,Zo,'N',i)
@@ -677,15 +677,30 @@ class RB(object):
             Z = np.append(Z,Z[-1]+dL*Bhat[1])
         return R,Z
         
+    def vessel(self):  # radial build from firstwall
+        Color = cycle(sns.color_palette('Set2',12)[1:])
+        self.FWfill(dt=self.setup.build['tfw'],color=next(Color))  # first wall 
+        self.fill(dt=self.setup.build['BB'][::-1],alpha=0.7,ref_o=0.3,dref=0.2,
+                  referance='length',color=next(Color))  # blanket+sheild
+        self.fill(dt=self.setup.build['tBBsupport'],alpha=0.7,
+                  color=next(Color))  # blanket support
+        self.BBsheild_fill(dt=self.setup.build['sheild'],
+                           ref_o=0.35*np.pi,dref=0.2*np.pi,
+                           offset=1/10*np.pi,alpha=0.7,color=next(Color))
+        self.VVfill(dt=self.setup.build['VV'],ref_o=0.25*np.pi,  # vessel
+                    dref=0.25*np.pi,offset=0.5/10*np.pi,alpha=0.7,
+                    loop=True,color=next(Color))  # ref_o=0.385
+        pl.axis('equal')
+        
     def FWfill(self,**kwargs):
-        self.R,self.Z = self.rzSLine(self.Rb[::-1],self.Zb[::-1],Hres=True)
-        self.fill(**kwargs)
+        self.R,self.Z = self.rzSLine(self.Rb[::-1],self.Zb[::-1],Hres=False)
+        self.fill(loop=True,alpha=0.7,**kwargs)
         self.R,self.Z = self.rzSLine(self.R,self.Z)
         self.R,self.Z = self.trim_contour(self.R[::-1],self.Z[::-1]) # update fw
 
     def BBsheild_fill(self,**kwargs):
-        if hasattr(self.conf,'sheild_connect'):
-            connect = self.conf.sheild_connect
+        if 'sheild_connect' in self.setup.build:
+            connect = self.setup.build['sheild_connect']
         else:
             connect=[0,1]
         index = self.trim(connect,self.R,self.Z)
@@ -693,7 +708,7 @@ class RB(object):
         zVV = self.Z[index[0]:index[1]+1]
         ni = 10  #  number of trim nodes
         rp,zp = rVV[-ni:],zVV[-ni:] 
-        if self.conf.Dsheild:
+        if self.setup.build['Dsheild']:
             Rleg,Zleg = [],[]
             Rd = self.Rb[self.Zb<self.sf.Xpoint[1]][::-1]
             Zd = self.Zb[self.Zb<self.sf.Xpoint[1]][::-1]
@@ -702,59 +717,59 @@ class RB(object):
             Rleg.append(Rd[index])
             Zleg.append(Zd[index])
         else:
-            Nsp = len(self.targets.keys())
-            if self.conf.sheild_base >= 0: Nsp+=1
+            Nsp = len(self.setup.targets.keys())-1  # ignore default
+            if self.setup.build['sheild_base'] >= 0: Nsp+=1
             sp = np.zeros((Nsp,),  # spline points
                                dtype=[('Rleg','float'),('Zleg','float'),
                                       ('Tleg','float'),('dR','float')])
             zmin = np.zeros((1,),  # spline points
                                dtype=[('Rleg','float'),('Zleg','float'),
                                       ('Tleg','float'),('dR','float')])
-            for i,leg in enumerate(self.targets.keys()):
-                Rt,Zt = self.targets[leg]['R'],self.targets[leg]['Z']
-                R,Z = self.offset(Rt,Zt,self.conf.tfw)
+            for i,leg in enumerate(list(self.setup.targets)[1:]):
+                Rt,Zt = self.setup.targets[leg]['R'],self.setup.targets[leg]['Z']
+                R,Z = self.offset(Rt,Zt,self.setup.build['tfw'])
                 dRt = np.mean((Rt-self.sf.Xpoint[0])**2+
                               (Zt-self.sf.Xpoint[1])**2)
                 dR = np.mean((R-self.sf.Xpoint[0])**2+
                               (Z-self.sf.Xpoint[1])**2)
                 if  dR<dRt:
-                    Rt,Zt = self.offset(Rt,Zt,-self.conf.tfw)
+                    Rt,Zt = self.offset(Rt,Zt,-self.setup.build['tfw'])
                 else:
                     Rt,Zt = R,Z
-                if self.targets[leg]['Zo'] > self.sf.Xpoint[1]:
-                    index = Zt<self.targets[leg]['Zo']
+                if self.setup.targets[leg]['Zo'] > self.sf.Xpoint[1]:
+                    index = Zt<self.setup.targets[leg]['Zo']
                 else:
-                    Zmax = self.targets[leg]['Zo']+\
-                    (self.sf.Xpoint[1]-self.targets[leg]['Zo'])/2
+                    Zmax = self.setup.targets[leg]['Zo']+\
+                    (self.sf.Xpoint[1]-self.setup.targets[leg]['Zo'])/2
                     index = Zt<Zmax  
                 Rt,Zt = Rt[index],Zt[index]              
                 radius = np.sqrt((Rt-self.sf.Xpoint[0])**2+
                                  (Zt-self.sf.Xpoint[1])**2)
                 argmax = np.argmax(radius)
-                r = radius[argmax]+self.targets[leg]['dR']
+                r = radius[argmax]+self.setup.targets[leg]['dR']
                 theta = np.arctan2(Rt[argmax]-self.sf.Xpoint[0],
                                    self.sf.Xpoint[1]-Zt[argmax])
                 sp['Rleg'][i] = self.sf.Xpoint[0]+r*np.sin(theta)
                 sp['Zleg'][i] = self.sf.Xpoint[1]-r*np.cos(theta)
                 sp['Tleg'][i] = theta
-                sp['dR'][i] = self.targets[leg]['dR']
+                sp['dR'][i] = self.setup.targets[leg]['dR']
             
             L = self.length(self.Rb,self.Zb,norm=False)[-1]
-            Rt,Zt = self.offset(self.Rb,self.Zb,self.conf.tfw)
+            Rt,Zt = self.offset(self.Rb,self.Zb,self.setup.build['tfw'])
             Lt = self.length(Rt,Zt,norm=False)[-1]
             if Lt<L:
-               Rt,Zt = self.offset(self.Rb,self.Zb,-self.conf.tfw) 
+               Rt,Zt = self.offset(self.Rb,self.Zb,-self.setup.build['tfw']) 
             argmin = np.argmin(Zt)
             radius = np.sqrt((Rt-self.sf.Xpoint[0])**2+
                                  (Zt-self.sf.Xpoint[1])**2)
-            r = radius[argmin]+self.conf.sheild_base
-            theta = np.arctan2(Rt[argmin]-self.sf.Xpoint[0],
-                               self.sf.Xpoint[1]-Zt[argmin])
-            zmin['Rleg'][0] = self.sf.Xpoint[0]+r*np.sin(theta)
-            zmin['Zleg'][0] = self.sf.Xpoint[1]-r*np.cos(theta)
-            zmin['Tleg'][0] = theta
-            zmin['dR'][0] = self.conf.sheild_base
-            if self.conf.sheild_base >= 0:
+            if self.setup.build['sheild_base'] >= 0:
+                r = radius[argmin]+self.setup.build['sheild_base']
+                theta = np.arctan2(Rt[argmin]-self.sf.Xpoint[0],
+                                   self.sf.Xpoint[1]-Zt[argmin])
+                zmin['Rleg'][0] = self.sf.Xpoint[0]+r*np.sin(theta)
+                zmin['Zleg'][0] = self.sf.Xpoint[1]-r*np.cos(theta)
+                zmin['Tleg'][0] = theta
+                zmin['dR'][0] = self.setup.build['sheild_base']
                 zmin = np.sort(zmin,order='Zleg')  
                 sp[-1] = zmin[0]
             sp = np.sort(sp,order='Tleg')[::-1]
@@ -806,18 +821,15 @@ class RB(object):
         radius_end = np.sqrt(dr_end**2+dz_end**2)
         ro_end = self.R[0]+dr_end
         zo_end = self.Z[0]+dz_end
-        
         theta_o = np.arctan2(zs[0]-zo_end,rs[0]-ro_end)
         theta_end = np.linspace(theta_o,theta_o+np.pi,20)
         r_end = ro_end+radius_end*np.cos(theta_end)
         z_end = zo_end+radius_end*np.sin(theta_end)
-        
         r_sheild = np.append(rs[::-1],r_end[1:-1])
         r_sheild = np.append(r_sheild,self.R)
         z_sheild = np.append(zs[::-1],z_end[1:-1])
         z_sheild = np.append(z_sheild,self.Z)
         self.R,self.Z = r_sheild,z_sheild
-        
         self.fill(trim=None,**kwargs)
     
     def drawTF(self,xCoil,Nspace=100):
@@ -859,32 +871,39 @@ class RB(object):
         length = length/L
         Rtf = interp1(length,Rtf)(np.linspace(0,1,Nspace))
         Ztf = interp1(length,Ztf)(np.linspace(0,1,Nspace))
-        
         return (Rtf,Ztf,L)
+        
+    def TFcoil(self,calc=True,plot_bounds=False):
+        self.set_TFbound()  # TF boundary conditions
+        self.TFbound['ro_min'] -= 0.5  # offset minimum radius
+        if plot_bounds:
+            self.plot_TFbounds()          
+        self.TFopp(calc)
+        self.TFfill()
 
-    def TFopp(self,TFopp,objF='L',**kwargs):
-        if 'config' in kwargs.keys():
-            config = kwargs['config']
-        else:
-            config = self.conf.config
-        self.TFobj = objF
+    def TFopp(self,TFopp,**kwargs):
+        if 'objF' not in kwargs:
+            self.TFobj = self.setup.TF['opp']
         if TFopp:
             #xCoilo = [5.12950249,1.89223928,4.13904361,4.52853726,-1.08407415]  
-            xCoilo = [ 6.42769145,  1.26028077,  4.51906176,  4.53712734, -2.22330594]            
+            xCoilo = [ 6.42769145,  1.26028077,  4.51906176,  4.53712734, -2.22330594] 
+            #xCoilo = [ 4.36308341,  3.00229706,  3.66983675,  4.56925003, -0.15107878]
             # [zCoil,r1,r2,ro,zo]  
             #xCoilo = [ 4.77411362,0.70016516,1.15501718,4.66075124,-1.03606014]
             #xCoilo = [ 3,0.71389467,1.46209824,4.42292996,-1.04186448]
             constraint = {'type':'ineq','fun':self.dotTF}
-            bounds = [(0.1,None),(1,None),(1,None),  # (0.7,None),(0.1,None)
-                      (self.TFbound['ro_min'],None),(None,None)]  # 
+            limit = 1e2
+            bounds = [(0.1,limit),(1,limit),(1,limit),  # (0.7,None),(0.1,None)
+                      (self.TFbound['ro_min'],limit),(-limit,limit)]  # 
             self.xCoil = op.minimize(self.fitTF,xCoilo,bounds=bounds,
-                                options={'disp':True,'maxiter':500},
-                                method='SLSQP',constraints=constraint,tol=1e-4).x
+                                     options={'disp':True,'maxiter':500},
+                                     method='SLSQP',constraints=constraint,
+                                     tol=1e-2).x
             
-            with open('../Data/'+config+'_TF.pkl', 'wb') as output:
+            with open('../Data/'+self.dataname+'_TF.pkl', 'wb') as output:
                 pickle.dump(self.xCoil,output,-1)
         else:
-            with open('../Data/'+config+'_TF.pkl', 'rb') as input:
+            with open('../Data/'+self.dataname+'_TF.pkl', 'rb') as input:
                 self.xCoil = pickle.load(input)
         self.volume_ratio()
         self.length_ratio()
@@ -893,17 +912,19 @@ class RB(object):
         VVinR,VVinZ = self.R,self.Z
         self.fill(**kwargs)
         VVoutR,VVoutZ = self.R,self.Z
-        with open('../Data/'+self.conf.config+'_VV.txt','w') as f:
+        with open('../Data/'+self.setup.configuration+'_VV.txt','w') as f:
             f.write('Rin m\t\tZin m\t\tRout m\t\tZout m\n')
             for rin,zin,rout,zout in zip(VVinR,VVinZ,VVoutR,VVoutZ):
                 f.write('{:1.6f}\t{:1.6f}\t{:1.6f}\t{:1.6f}\n'.format(\
                 rin,zin,rout,zout))
                 
     def TFwidth(self,sf):
+        '''
         Icoil = 2*np.pi*sf.rcentr*\
         np.abs(sf.bcentr)/(4*np.pi*1e-7)/self.nTF # coil amp-turns
         Acoil = Icoil/self.Jmax
         self.dRcoil = np.sqrt(Acoil)
+        '''
         self.dRcoil = 0.489
         self.dRsteel = 0.15*self.dRcoil
  
@@ -920,7 +941,7 @@ class RB(object):
                   label='TF support',part_fill=False,loop=True)
         self.TFoutR,self.TFoutZ = self.R,self.Z
         
-        with open('../Data/'+self.conf.config+'_TFcoil.txt','w') as f:
+        with open('../Data/'+self.dataname+'_TFcoil.txt','w') as f:
             f.write('Rin m\t\tZin m\t\tRout m\t\tZout m\n')
             for rin,zin,rout,zout in zip(self.TFinR,self.TFinZ,
                                          self.TFoutR,self.TFoutZ):
@@ -1019,22 +1040,6 @@ class RB(object):
         dsum = 0
         for Side in ['in','out']:
             dsum += self.dot_diffrence(xCoil,Side) 
-            
-        Zfrac = 0.9  # fraction of plasma covered by straight TF
-        top = xCoil[-1]+xCoil[0]  # top of straight section
-        bottom = xCoil[-1]-xCoil[0]  # bottom of straight section
-        Zplasma = np.max(self.Zp)-np.min(self.Zp)
-        #if np.max(self.Zp)-top > (1-Zfrac)/2*Zplasma:  # straigh at top
-        #    dsum -= np.max(self.Zp)-top-(1-Zfrac)/2*Zplasma
-        #if bottom-np.min(self.Zp) > (1-Zfrac)/2*Zplasma:  # straight at bottom
-        #    dsum -= bottom-np.min(self.Zp)-(1-Zfrac)/2*Zplasma
-        '''
-        Zplasma = np.max(self.Zp)-self.sf.Mpoint[1]
-        Zstraight = xCoil[0]+self.xo[1]-self.sf.Mpoint[1]#-xCoil[4])  # xCoil[0]-(self.xo[1]-xCoil[4])
-        if 0.65*Zplasma > Zstraight:
-            dsum -= 0.65*Zplasma-Zstraight  
-        '''
-
         return dsum
         
     def coil_corners(self,coils):
@@ -1059,22 +1064,10 @@ class RB(object):
         return R,Z
         
     def set_TFbound(self):
-        if hasattr(self,'Rb'):
-            #Rb = np.append(self.R,self.Rb)
-            #Zb = np.append(self.Z,self.Zb)
-            Rb = self.R
-            Zb = self.Z
-        else:
-            Rb = self.R
-            Zb = self.Z
-        Rin,Zin = self.coil_corners(self.conf.coils['internal'])  # internal coils    
-        Rex,Zex = self.coil_corners(self.conf.coils['external'])  # external coils
-        #if 'Coil2' in self.sf.coil.keys():
-        #    ro_min = self.sf.coil['Coil2']['r']+self.sf.coil['Coil2']['dr']/2+\
-        #    self.dRcoil+2*self.dRsteel
-        #else:
-        ro_min = 4.35
-        internal = {'R':np.append(Rb,Rin),'Z':np.append(Zb,Zin)}
+        Rin,Zin = self.coil_corners(self.setup.coils['internal'])  # internal coils    
+        Rex,Zex = self.coil_corners(self.setup.coils['external'])  # external coils
+        ro_min = 4.35  # minimum TF radius
+        internal = {'R':np.append(self.R,Rin),'Z':np.append(self.Z,Zin)}
         external = {'R':Rex,'Z':Zex}
         self.TFbound = {'in':internal,'out':external,'ro_min':ro_min}
         

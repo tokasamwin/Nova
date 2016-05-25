@@ -10,7 +10,7 @@ sns.set(context='poster',style='white',font='sans-serif',palette='Set2',
         font_scale=7/8,rc=rc)
 color = sns.color_palette('Set2')
 
-coil = {'r':8,'z':-1,'I':30e6,'rc':0.01}
+coil = {'r':8,'z':-10,'I':30e6,'rc':0.01}
 
 limit = [-12,12,-12,12]
 
