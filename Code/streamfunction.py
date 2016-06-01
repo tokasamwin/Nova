@@ -5,7 +5,6 @@ from scipy.interpolate import UnivariateSpline as spline
 from scipy.interpolate import InterpolatedUnivariateSpline as sinterp
 from scipy.interpolate import interp1d
 from scipy.optimize import minimize
-from itertools import count,cycle
 import geqdsk
 import seaborn as sns
 from matplotlib._cntr import Cntr as cntr
@@ -16,18 +15,18 @@ class SF(object):
     def __init__(self,filename,upsample=1,**kwargs):
         self.filename = filename
         self.set_kwargs(kwargs)
-        eq = geqdsk.read('../eqdsk/'+self.filename)
-        self.eq = eq
+        eqdsk = geqdsk.read('../eqdsk/'+self.filename)
+        self.eqdsk = eqdsk
         self.normalise()  # unit normalisation
-        self.set_plasma(eq,contour=False)
-        self.set_boundary(eq['rbdry'],eq['zbdry'])
-        self.set_coils(eq)
-        self.set_flux(eq)  # calculate flux profiles
-        self.set_TF(eq)  
-        self.set_current(eq)
+        self.set_plasma(eqdsk,contour=False)
+        self.set_boundary(eqdsk['rbdry'],eqdsk['zbdry'])
+        #self.set_coils(eqdsk)
+        self.set_flux(eqdsk)  # calculate flux profiles
+        self.set_TF(eqdsk)  
+        self.set_current(eqdsk)
         xo_arg = np.argmin(self.zbdry)
         self.xo = [self.rbdry[xo_arg],self.zbdry[xo_arg]]
-        self.mo = [eq['rmagx'],eq['zmagx']]
+        self.mo = [eqdsk['rmagx'],eqdsk['zmagx']]
         self.upsample(upsample)
         self.get_Xpsi()
         self.get_Mpsi()
@@ -35,7 +34,7 @@ class SF(object):
         self.get_sol_psi(dSOL=3e-3,Nsol=15,verbose=False)
         self.rcirc = 0.2*(self.Mpoint[1]-self.Xpoint[1])  # leg search radius
         self.drcirc = 0.1*self.rcirc  # leg search width
-        self.xlim,self.ylim,self.nlim = eq['xlim'],eq['ylim'],eq['nlim']
+        self.xlim,self.ylim,self.nlim = eqdsk['xlim'],eqdsk['ylim'],eqdsk['nlim']
 
     def set_kwargs(self,kwargs):
         for key in kwargs:
@@ -48,16 +47,16 @@ class SF(object):
         self.dataname = conf.dataname
               
     def normalise(self):
-        if 'Fiesta' in self.eq['name'] or 'Nova' in self.eq['name']\
-        or 'disr' in self.eq['name']:
+        if 'Fiesta' in self.eqdsk['name'] or 'Nova' in self.eqdsk['name']\
+        or 'disr' in self.eqdsk['name']:
             self.norm = 1
         else:  # CREATE
-            self.eq['cpasma'] *= -1
+            self.eqdsk['cpasma'] *= -1
             self.norm = 2*np.pi
             for key in ['psi','simagx','sibdry']:
-                self.eq[key] /= self.norm  # per radian
+                self.eqdsk[key] /= self.norm  # per radian
             for key in ['ffprim','pprime']:
-                self.eq[key] *= self.norm  # per Webber/radian  
+                self.eqdsk[key] *= self.norm  # per Webber/radian  
         self.b_scale = 1  # flux function scaling
 
     def trim_r(self,rmin=1.5):
@@ -79,15 +78,15 @@ class SF(object):
               'r':self.r, 'z':self.z,  # Location of the grid-points
               'rdim':self.r[-1]-self.r[0],  # Size of the domain in meters
               'zdim':self.z[-1]-self.z[0],  # Size of the domain in meters
-              'rcentr':self.eq['rcentr'],  # Reference vacuum toroidal field (m, T)
-              'bcentr':self.eq['bcentr'],  # Reference vacuum toroidal field (m, T)
+              'rcentr':self.eqdsk['rcentr'],  # Reference vacuum toroidal field (m, T)
+              'bcentr':self.eqdsk['bcentr'],  # Reference vacuum toroidal field (m, T)
               'rgrid1':self.r[0],  # R of left side of domain
               'zmid':self.z[0]+(self.z[-1]-self.z[0])/2,  # Z at the middle of the domain
               'rmagx':self.Mpoint[0],  # Location of magnetic axis
               'zmagx':self.Mpoint[1],  # Location of magnetic axis
               'simagx':self.Mpsi,  # Poloidal flux at the axis (Weber / rad)
               'sibdry':self.Xpsi,  # Poloidal flux at plasma boundary (Weber / rad)
-              'cpasma':self.eq['cpasma'], 
+              'cpasma':self.eqdsk['cpasma'], 
               'psi':np.transpose(self.psi).reshape((-1,)),  # Poloidal flux in Weber/rad on grid points
               'fpol':self.Fpsi(psi_ff),  # Poloidal current function on uniform flux grid
               'ffprim':self.b_scale*self.FFprime(psi_ff),  # "FF'(psi) in (mT)^2/(Weber/rad) on uniform flux grid"
@@ -108,24 +107,10 @@ class SF(object):
             f.write('psi_norm\tp\' [Pa/(Weber/rad)]\tFF\' [(mT)^2/(Weber/rad)]\n')
             for psi,p_,FF_ in zip(psi_norm,pprime,FFprime):
                 f.write('{:1.4f}\t\t{:1.4f}\t\t{:1.4f}\n'.format(psi,p_,FF_))
-          
-    def unpack_coils(self):
-        nc = len(self.coil.keys())
-        Ic = np.zeros(nc)
-        rc,zc,drc,dzc = np.zeros(nc),np.zeros(nc),np.zeros(nc),np.zeros(nc)
-        names = []
-        for i,name in enumerate(self.coil.keys()):
-            rc[i] = self.coil[name]['r']
-            zc[i] = self.coil[name]['z']
-            drc[i] = self.coil[name]['dr']
-            dzc[i] = self.coil[name]['dz']
-            Ic[i] = self.coil[name]['I']
-            names.append(name)
-        return nc,rc,zc,drc,dzc,Ic,names
-        
-    def set_flux(self,eq):
-        F_ff = eq['fpol']
-        P_ff = eq['pressure']
+
+    def set_flux(self,eqdsk):
+        F_ff = eqdsk['fpol']
+        P_ff = eqdsk['pressure']
         n = len(F_ff)
         psi_ff = np.linspace(0,1,n)
         #F_ff = spline(psi_ff,F_ff,s=1e-7)(psi_ff)
@@ -138,8 +123,8 @@ class SF(object):
         self.Fpsi = interp1d(psi_ff,F_ff)
         self.dFpsi = interp1d(psi_ff,dP_ff)
         self.dPpsi = interp1d(psi_ff,dP_ff)
-        FFp = spline(psi_ff,eq['ffprim'],s=1e-5)(psi_ff)
-        Pp = spline(psi_ff,eq['pprime'],s=1e2)(psi_ff) # s=1e5
+        FFp = spline(psi_ff,eqdsk['ffprim'],s=1e-5)(psi_ff)
+        Pp = spline(psi_ff,eqdsk['pprime'],s=1e2)(psi_ff) # s=1e5
         
         #self.FFprime = interp1d(psi_ff,F_ff*dF_ff,fill_value=0,bounds_error=False)
         #self.Pprime = interp1d(psi_ff,dP_ff,fill_value=0,bounds_error=False)
@@ -147,9 +132,9 @@ class SF(object):
         self.FFprime = interp1d(psi_ff,FFp,fill_value=0,bounds_error=False)
         self.Pprime = interp1d(psi_ff,Pp,fill_value=0,bounds_error=False)
 
-    def set_TF(self,eq):
+    def set_TF(self,eqdsk):
         for key in ['rcentr','bcentr']: 
-            setattr(self,key,eq[key])
+            setattr(self,key,eqdsk[key])
   
     def length(self,R,Z,norm=True):
         L = np.append(0,np.cumsum(np.sqrt(np.diff(R)**2+np.diff(Z)**2)))
@@ -168,9 +153,9 @@ class SF(object):
         #self.rbdry[0] = self.rbdry[-1]
         #self.zbdry[0] = self.zbdry[-1]
          
-    def set_current(self,eq):
+    def set_current(self,eqdsk):
         for key in ['cpasma']: 
-            setattr(self,key,eq[key])
+            setattr(self,key,eqdsk[key])
             
     def update_plasma(self,eq):  # update requres full separatrix
         for attr in ['Bspline','Pspline','Xpsi','Mpsi','Br','Bz']:
@@ -194,23 +179,7 @@ class SF(object):
         if contour:
             self.get_Xpsi()
             self.set_contour()  # calculate cfeild
-  
-    def set_coils(self,eq):
-        self.coil = {}
-        if eq['ncoil'] > 0: 
-            nC = count(0)
-            for i,(r,z,dr,dz,I) in enumerate(zip(eq['rc'],eq['zc'],eq['drc'],
-                                                     eq['dzc'],eq['Ic'])):
-                name = 'Coil{:1.0f}'.format(next(nC))
-                self.coil[name] = {'r':r,'z':z,'dr':dr,'dz':dz,'I':I,
-                                   'rc':np.sqrt(dr**2+dz**2)/2}
-                '''
-                if self.config is 'SN':
-                    if i==10: break
-                if self.config is 'SF2':
-                    if i==15: break
-                '''
-        
+     
     def upsample(self,sample):
         if sample>1:
             '''
@@ -372,8 +341,8 @@ class SF(object):
             if hasattr(self,'xo'):
                 xo = self.xo
             else:
-                xo_arg = np.argmin(self.eq['zbdry'])
-                xo = [self.eq['rbdry'][xo_arg],self.eq['zbdry'][xo_arg]]
+                xo_arg = np.argmin(self.eqdsk['zbdry'])
+                xo = [self.eqdsk['rbdry'][xo_arg],self.eqdsk['zbdry'][xo_arg]]
         Xpoint = np.zeros((2,2))
         Xpsi = np.zeros(2)
         for i,flip in enumerate([1,-1]):
@@ -589,59 +558,6 @@ class SF(object):
                     Rs.append(R)
                     Zs.append(Z)
         return Rs,Zs
-
-    def plot_coil(self,coils,label=False,current=False,coil_color=None,fs=12):
-        if coil_color==None:
-            color = cycle(sns.color_palette('Set2',len(coils.keys())))
-        else:
-            color = coil_color  # color itterator
-        
-        color = sns.color_palette('Set3',30)
-        for i,name in enumerate(coils.keys()):
-            coil = coils[name]
-            if label and current:
-                zshift = coil['dz']/4
-            else:
-                zshift = 0
-            r,z,dr,dz = coil['r'],coil['z'],coil['dr'],coil['dz']
-            Rfill = [r+dr/2,r+dr/2,r-dr/2,r-dr/2]
-            Zfill = [z-dz/2,z+dz/2,z+dz/2,z-dz/2]
-            if coil['I'] != 0:
-                edgecolor = 'k'
-            else:
-                edgecolor = 'r'  
-            #coil_color = next(color)
-            try:
-                ic = int(name.split('_')[0].split('Coil')[-1])
-            except:
-                ic = 0  # plasma coils
-            coil_color = color[ic]   
-            pl.fill(Rfill,Zfill,facecolor=coil_color,alpha=0.75,
-                    edgecolor=edgecolor)
-            if label: 
-                pl.text(r,z+zshift,name.replace('Coil',''),fontsize=fs*0.6,
-                        ha='center',va='center',color=[0.25,0.25,0.25])
-            if current: 
-                if r<self.Xpoint[0]:
-                    drs = -2/3*dr
-                    ha = 'right'
-                else:
-                    drs = 2/3*dr
-                    ha = 'left'
-                pl.text(r+drs,z-zshift,'{:1.1f}MA'.format(coil['I']*1e-6),
-                        fontsize=fs*0.6,ha=ha,va='center',
-                        color=[0.25,0.25,0.25])
-                                  
-    def plot_coils(self,color=None,coils=None,label=False,plasma=False,current=False):
-        import matplotlib
-        fs = matplotlib.rcParams['legend.fontsize']
-        if coils is None:
-            coils = self.coil
-        self.plot_coil(coils,label=label,current=current,fs=fs,
-                       coil_color=color)
-        if plasma:
-            coils = self.plasma_coil                
-            self.plot_coil(coils,coil_color=color)
                     
     def topolar(self,R,Z):
         x,y = R,Z
