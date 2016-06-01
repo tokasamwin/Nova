@@ -1,7 +1,7 @@
 import pylab as pl
 import numpy as np
 from itertools import cycle
-from eqconfig import eqsetup
+from config import Setup
 
 from radial_build import RB
 from streamfunction import SF
@@ -11,7 +11,6 @@ from addtext import linelabel
 import time
 from inverse import INV
 
-conf = eqsetup('SX')
 
 #from elliptic import grid
 #import cross_coil as cc
@@ -32,17 +31,25 @@ pl.axis('off')
 #pl.ylim([-12.5,11])
 #pl.xlim([7,8])
 
+setup = Setup('SN')
+sf = SF(setup.filename,sample=4,Nova=False)
+rb = RB(setup,sf,Np=250)
 
-conf = Config(config)
-sf = SF(conf,sample=4,Nova=False)
+
+#conf = Config(config)
+#sf = SF(conf,sample=4,Nova=False)
 sf.contour()
 #eq = EQ(sf,sigma=0,limit=[5.5,12,-8,5],n=5e4)  # resample
 #eq.plotj()
 
 #
-conf.TF(sf)
-rb = RB(conf,sf,Np=250)
-rb.divertor_outline(True,plot=True,debug=False)
+#conf.TF(sf)
+#rb = RB(conf,sf,Np=250)
+
+rb.firstwall(calc=True,plot=True,debug=False)
+rb.trim_sol(plot=True)
+
+'''
 
 leg = 'outer'
 if config == 'SN':

@@ -831,6 +831,16 @@ class RB(object):
         z_sheild = np.append(z_sheild,self.Z)
         self.R,self.Z = r_sheild,z_sheild
         self.fill(trim=None,**kwargs)
+        
+    def VVfill(self,**kwargs):
+        VVinR,VVinZ = self.R,self.Z
+        self.fill(**kwargs)
+        VVoutR,VVoutZ = self.R,self.Z
+        with open('../Data/'+self.setup.configuration+'_VV.txt','w') as f:
+            f.write('Rin m\t\tZin m\t\tRout m\t\tZout m\n')
+            for rin,zin,rout,zout in zip(VVinR,VVinZ,VVoutR,VVoutZ):
+                f.write('{:1.6f}\t{:1.6f}\t{:1.6f}\t{:1.6f}\n'.format(\
+                rin,zin,rout,zout))
     
     def drawTF(self,xCoil,Nspace=100):
         zCoil = xCoil[0]
@@ -907,16 +917,6 @@ class RB(object):
                 self.xCoil = pickle.load(input)
         self.volume_ratio()
         self.length_ratio()
-        
-    def VVfill(self,**kwargs):
-        VVinR,VVinZ = self.R,self.Z
-        self.fill(**kwargs)
-        VVoutR,VVoutZ = self.R,self.Z
-        with open('../Data/'+self.setup.configuration+'_VV.txt','w') as f:
-            f.write('Rin m\t\tZin m\t\tRout m\t\tZout m\n')
-            for rin,zin,rout,zout in zip(VVinR,VVinZ,VVoutR,VVoutZ):
-                f.write('{:1.6f}\t{:1.6f}\t{:1.6f}\t{:1.6f}\n'.format(\
-                rin,zin,rout,zout))
                 
     def TFwidth(self,sf):
         '''
