@@ -26,16 +26,15 @@ class MidpointNormalize(Normalize):
         return np.ma.masked_array(np.interp(value, x, y))
 
 class EQ(object):
-    
-    def __init__(self,sf,sigma=0.1,dCoil=0.5,**kwargs):
+    def __init__(self,sf,pf,sigma=0,dCoil=0.5,**kwargs):
         self.mu_o = 4*np.pi*1e-7  # magnetic constant [Vs/Am]
         self.sf = sf
+        self.pf = pf
         self.coils(dCoil=dCoil)  # multi-filiment coils 
         self.get_Vcoil()  # identify vertical stability coils
-        if len(kwargs) > 0:
-            self.resample(sigma=sigma,**kwargs)
+        self.resample(sigma=sigma,**kwargs)
         
-    def resample(self,sigma=0.1,**kwargs):  # resample current density
+    def resample(self,sigma=0,**kwargs):  # resample current density
         self.r,self.z = self.sf.r,self.sf.z 
         self.r2d,self.z2d = self.sf.r2d,self.sf.z2d    
         self.dr,self.dz,self.dA = self.sf.dr,self.sf.dz,self.sf.dr*self.sf.dz
@@ -124,7 +123,7 @@ class EQ(object):
                 self.dCoil = 0
         else:
             self.dCoil = dCoil
-        coil = self.sf.coil
+        coil = self.pf.coil
         if self.dCoil==0:
             self.coil = coil
             for name in coil.keys():
@@ -170,8 +169,8 @@ class EQ(object):
                           
     def get_Vcoil(self):
         ex_coil = []
-        for name in self.sf.coil.keys():
-            if 'plasma' not in name:  # and self.sf.coil[name]['z'] > self.sf.Xpoint[1]:
+        for name in self.pf.coil.keys():
+            if 'plasma' not in name:  
                 ex_coil.append(name)
         Nex = len(ex_coil)
         self.Vcoil = np.zeros((Nex,),dtype=[('name','S10'),('value','float'),
@@ -179,11 +178,11 @@ class EQ(object):
                                             ('Ii','float'),('Nf','int')])
         for i,name in enumerate(ex_coil):
             self.Vcoil['name'][i] = name
-            self.Vcoil['Io'][i] = self.sf.coil[name]['I']
+            self.Vcoil['Io'][i] = self.pf.coil[name]['I']
             self.Vcoil['Nf'][i] = self.coil[name+'_0']['Nf']  
             Mpoint = self.sf.Mpoint
-            r,z = self.sf.coil[name]['r'],self.sf.coil[name]['z']
-            I = self.sf.coil[name]['I']
+            r,z = self.pf.coil[name]['r'],self.pf.coil[name]['z']
+            I = self.pf.coil[name]['I']
             self.Vcoil['value'][i] = np.sign(I)*cc.green_feild(Mpoint[0],Mpoint[1],
                                                       r,z)[0]  
         self.Vcoil = np.sort(self.Vcoil,order='value')
@@ -404,14 +403,16 @@ class EQ(object):
         self.coreBC(update=update)
         self.edgeBC()
         self.psi = self.solve()
+        print('run')
         self.set_eq_psi()
             
     def set_eq_psi(self):  # set psi from eq
-        eq = {'r':self.r,'z':self.z,'psi':self.psi}
-        #try:
-        #    self.sf.update_plasma(eq)  # include boundary update
-        #except:
-        self.sf.set_plasma(eq,contour=True)
+        eqdsk = {'r':self.r,'z':self.z,'psi':self.psi}
+        try:
+            self.sf.update_plasma(eqdsk)  # include boundary update
+        except:
+            print('boundary update failed')
+            self.sf.set_plasma(eqdsk,contour=True)
     
     def plasma(self):
         self.resetBC()

@@ -79,7 +79,7 @@ class PF(object):
                         fontsize=fs*0.6,ha=ha,va='center',
                         color=[0.25,0.25,0.25])
                                   
-    def plot_coils(self,color=None,coils=None,label=False,plasma=False,
+    def plot(self,color=None,coils=None,label=False,plasma=False,
                    current=False):
         fs = matplotlib.rcParams['legend.fontsize']
         if coils is None:

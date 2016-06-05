@@ -295,8 +295,7 @@ class RB(object):
         Bhat = (R*np.matrix([[B[0]],[B[1]]])).getA1()/Bmag
         return Bhat
         
-    def firstwall(self,calc=True,color=[0.5,0.5,0.5],
-                         plot=True,debug=False):
+    def firstwall(self,calc=True,color=[0.5,0.5,0.5],plot=True,debug=False):
         if calc:
             self.Rb,self.Zb = self.target_fill(debug=debug)
             with open('../Data/'+self.dataname+'_FW.pkl', 'wb') as output:
@@ -308,7 +307,6 @@ class RB(object):
                 self.setup.targets = pickle.load(input)
                 self.Rb = pickle.load(input)
                 self.Zb = pickle.load(input)
-        #self.Rb,self.Zb = self.midplane_loop(self.Rb,self.Zb)  # clockwise LFS
         self.R,self.Z = self.trim_contour(self.Rb,self.Zb) # update fw
         self.sf.nlim = len(self.Rb)  # update sf
         self.sf.xlim,self.sf.ylim = self.Rb,self.Zb
@@ -317,6 +315,11 @@ class RB(object):
             (self.Zb <= self.sf.z.max()) & (self.Zb >= self.sf.z.min())
             pl.plot(self.Rb[index],self.Zb[index],
                     '-',color=color,alpha=0.75,linewidth=1.25)
+            
+    def get_fw(self,expand=0):  # generate boundary dict for elliptic
+        self.firstwall(calc=False,plot=False,debug=False)
+        boundary = {'R':self.Rb,'Z':self.Zb,'expand':expand}
+        return boundary
         
     def connect(self,psi,target_pair,ends,loop=[]):
         gap = []

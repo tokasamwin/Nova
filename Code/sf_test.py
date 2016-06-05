@@ -20,17 +20,21 @@ sf = SF(setup.filename)
 rb = RB(setup,sf)
 pf = PF(sf.eqdsk)
 
+
+
+#eq = EQ(sf,pf,sigma=0.1,boundary=rb.get_fw(expand=0.25),n=2e4)  
+#eq.plotj()
+
+#pf.plot(coils=eq.coil,label=False,plasma=False) 
+
 sf.contour()
 
-#eq = EQ(sf,sigma=0,limit=[6,10,-7,-3],n=1e3)  # resample
-#sf.plot_coils(next(Color),coils=eq.coil,label=False,plasma=False) 
+pf.plot(coils=pf.coil,label=True,plasma=False,current=False) 
 
-
-
-pf.plot_coils(coils=pf.coil,label=True,plasma=False,current=False) 
-rb.firstwall(calc=True,plot=True,debug=False)
+rb.firstwall(calc=True,plot=True,debug=True)
+'''
 #rb.vessel()
 #rb.TFcoil(False)
 #rb.trim_sol(plot=True)
 
-
+'''
