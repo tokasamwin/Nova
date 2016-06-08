@@ -215,7 +215,9 @@ class TF(object):
         length = length/L
         Rtf = interp1(length,Rtf)(np.linspace(0,1,Nspace))
         Ztf = interp1(length,Ztf)(np.linspace(0,1,Nspace))
-        return (Rtf,Ztf,L)
+        L = np.cumsum(np.sqrt(np.diff(Rtf)**2+np.diff(Ztf)**2))
+        L = np.append(0,L)
+        return (Rtf,Ztf,L[-1])
         
     def TFcoil(self,calc=True,plot_bounds=False):
         self.set_TFbound()  # TF boundary conditions
