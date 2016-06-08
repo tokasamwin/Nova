@@ -1,14 +1,20 @@
-import sys
-sys.path.append('../../Etna/Python/')
-
 import pylab as pl
-from config import Setup
-from streamfunction import SF
-from radial_build import RB
-from coils import PF,TF
-import geqdsk
+from nova.config import Setup
+from nova.streamfunction import SF
+from nova.radial_build import RB
+from nova.coils import PF,TF
+from etna.coil_geom import configure
+from etna.coil_apdl import coil_map
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
+
+
+
+
+
+cmap = coil_map(configure('TF',Ndp=3,Nloop=1))
+cmap.wrap()
+
 
 import seaborn as sns
 rc = {'figure.figsize':[10,10*12/16],'savefig.dpi':100, # 
@@ -71,7 +77,8 @@ for t in theta:
     print(t,134**2*inductance(X,Xo))
     ax.plot(X[:,0],X[:,1],X[:,2])
 
-    
+
+ax.auto_scale_xyz([-10,10],[-10,10],[-15,5])   
 '''
 
 
@@ -84,7 +91,7 @@ for t in theta:
 
 #ax.plot(x,y,z)
 
-ax.auto_scale_xyz([-10,10],[-10,10],[-15,5])
+
 ax.axis('off')
 
 #pf.plot(coils=pf.coil,label=True,plasma=False,current=False) 

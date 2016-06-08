@@ -5,7 +5,7 @@ from scipy.interpolate import UnivariateSpline as spline
 from scipy.interpolate import InterpolatedUnivariateSpline as sinterp
 from scipy.interpolate import interp1d
 from scipy.optimize import minimize
-import geqdsk
+from nova import geqdsk
 import seaborn as sns
 from matplotlib._cntr import Cntr as cntr
 from collections import OrderedDict
