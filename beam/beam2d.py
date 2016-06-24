@@ -19,7 +19,7 @@ def elem_k(dL):
      
 L = 10
      
-Nel = 51
+Nel = 201
 dL = L/Nel
 n = 4+2*(Nel-1)
 k = np.zeros((n,n))
@@ -34,7 +34,7 @@ k = k[2:,2:] # fix end
 
 F = np.zeros((n-2,1))
 
-P = [[0.3,-0.1],[1,-0.75],[0.5,1.5]]
+P = [[0.3,-0.1],[1,-0.95],[0.5,1.5]]
 for p in P:
     n = int(np.ceil(p[0]*Nel)*2)-1
     F[n] = p[1]
@@ -54,9 +54,9 @@ Fo = np.dot(k,np.reshape(vs,(len(vs),1)))
 
 pl.plot(vs[::2],'o-')
 
-pl.plot(vs[1::2],'o-')
+#pl.plot(vs[1::2],'o-')
+#pl.plot(0.2*np.cumsum(vs[1::2]),'o-')
 
-pl.plot(0.2*np.cumsum(vs[1::2]),'o-')
 '''
 ks = np.append(ke,np.zeros((2,np.shape(ke)[1])),axis=0)          
 ks[4,0] = 1
