@@ -161,7 +161,7 @@ class DEMO(object):
                 
             if part in ['TF_Coil','Vessel','Blanket']:
                 if side != 'out':
-                    x = geom.polyloop(x)
+                    x = geom.polyloop(x['in'],x['out'])
                 else:
                     x['r'],x['z'] = geom.pointloop(x['out']['r'],x['out']['z'])
                     lines = cutcorners(x['r'],x['z'])  # select halfs
@@ -313,9 +313,9 @@ class DEMO(object):
 if __name__ is '__main__':          
         demo = DEMO()
         
-        demo.fill_loops()
+        #demo.fill_loops()
         demo.get_limiters()
-        demo.get_ports()
+        #demo.get_ports()
         demo.get_fw()
         
         #demo.write()
@@ -340,29 +340,55 @@ if __name__ is '__main__':
         config = 'DEMO_SN'
         setup = Setup(config)
         sf = SF(setup.filename)
+        sf.get_boundary(plot=True)
+        
+        config = 'DEMO_SNb'
+        setup = Setup(config)
+        sf = SF(setup.filename)
+        sf.get_boundary(plot=True)
         
         pf = PF(sf.eqdsk)
-        eq = EQ(sf,pf,limit=[4.5,14.5,-8,8],n=5e3) 
+        eq = EQ(sf,pf,limit=[4.5,14.5,-8,8],n=1e4) 
         rb = RB(setup,sf)
+        #sf.contour(plot_vac=True)
         
-        r = demo.parts['Vessel']['out']['r']  # set vessel boundary
-        z = demo.parts['Vessel']['out']['z']
+        
+        #sf.get_legs(debug=True)
+        
+        
+        rb.set_firstwall(sf.eqdsk['xlim'],sf.eqdsk['ylim'])
+        pl.plot(rb.Rb,rb.Zb)
+
+        
+        sf.sol(dr=3e-3)
+        rb.get_sol(plot=True)
+       
+        
+        pl.plot(sf.eqdsk['xlim'],sf.eqdsk['ylim'])
+        
+        r = demo.parts['Vessel']['r']  # set vessel boundary
+        z = demo.parts['Vessel']['z']
         
         r,z = geom.offset(r,z,0.2)  # 200mm offset from vessel 
         r,z = geom.rzSLine(r,z,npoints=20)
         rb.loop = geom.Loop(r,z)
         
+
+
+        #sf.sol(plot=True)
+        
+        '''
         nTF = 18
         tf = TF(shape={'vessel':rb.loop,'pf':pf,'sf':sf,'fit':True,
                        'setup':setup,'coil_type':'S','config':config},nTF=nTF)
-
+        
         #tf = TF(shape={'coil_type':'S','config':config,'sf':sf})  
                        
 
         tf.coil.plot()
         tf.fill(text=True)
         tf.plot_oppvar()
-
+        '''
 
 
 
