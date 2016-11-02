@@ -33,7 +33,7 @@ with open('D:/Code/Nova/Data/salome_input.json','r') as f:  # _S16L
     data = json.load(f)
 loop,cs,pf,nTF = data['p'],data['section'],data['pf'],data['nTF']
 color = data['color']
-PFsupport = data['PFsupport']
+PFsupport,CSsupport = data['PFsupport'],data['CSsupport']
 
 geompy = geomBuilder.New(theStudy)
 w = []
@@ -141,6 +141,32 @@ for p in profiles:
 
 OY = geompy.MakeVectorDXDYDZ(0,1,0) 
 OZ = geompy.MakeVectorDXDYDZ(0,0,1)   
+ztop,zo,dt = CSsupport['ztop'],CSsupport['zo'],CSsupport['dt']
+rnode,ynode = [],[]
+for point in ['wp','nose']:
+    rnode.append(CSsupport['r{}'.format(point)])
+    ynode.append(CSsupport['y{}'.format(point)])
+vseat = []
+for sign in [-1,1]:  
+    v = []
+    v.append(geompy.MakeVertex(rnode[0],sign*ynode[0],ztop))
+    v.append(geompy.MakeVertex(rnode[1],sign*ynode[1],ztop))
+    vseat.append(v[::sign])
+    v.append(geompy.MakeVertex(rnode[1],sign*ynode[1]-sign*dt,ztop))
+    v.append(geompy.MakeVertex(rnode[0],sign*ynode[0]-sign*dt,ztop))
+    v.append(v[0])
+    support_loop = geompy.MakePolyline(v)
+    face = geompy.MakeFaceWires([support_loop],1)
+    solid = geompy.MakePrismVecH(face,OZ,-0.999*(ztop-zo))
+    shell['case']['solid'] = geompy.MakeFuseList([shell['case']['solid'],
+                                                  solid],True,True)
+vseat.append(vseat[0])
+seat_loop = geompy.MakePolyline(vseat)
+face = geompy.MakeFaceWires([seat_loop],1)
+solid = geompy.MakePrismVecH(face,OZ,-dt)
+shell['case']['solid'] = geompy.MakeFuseList([shell['case']['solid'],solid],
+                                             True,True)
+
 PFsup = {'dt':side,'n':2}
 for name in PFsupport:
     v = []
@@ -181,8 +207,6 @@ for name in PFsupport:
     shell['case']['solid'] = geompy.MakeFuseList([shell['case']['solid'],
                                                      solid],True,True)
 
-
-
 #shell['case']['solid'] = geompy.MakeCutList(shell['case']['solid'],\
 #[shell['wp']['solid']],True)
 
@@ -215,8 +239,6 @@ for i in range(len(pf)):
  
 coil_set = geompy.MakeCompound(coil_set)
 geompy.addToStudy(coil_set,'coil_set')
-#gg.createAndDisplayGO(coil_set_id)
-
 geompy.ExportSTEP(coil_set,'D:/Code/Nova/nova/TF/geom/coil_set.step',
                   GEOM.LU_METER)
 
