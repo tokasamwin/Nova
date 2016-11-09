@@ -1,0 +1,3 @@
+import cadviewer
+
+cadviewer.cadViewer()

@@ -2,12 +2,20 @@ import sys
 import json
 import math
 import numpy as np
-
+from OCC.Quantity import Quantity_Color, Quantity_TOC_RGB
 import seaborn as sns
-colors = sns.color_palette('Set2',12)
-rgba = list(colors[3])
-rgba.append(0)  # add alpha
+colors = sns.color_palette('Paired',12)
+QC = [[] for i in range(len(colors))]
+for i,c in enumerate(colors):
+    QC[i] = Quantity_Color(*c,Quantity_TOC_RGB)
+    QC[i].ChangeIntensity(-50)
 
+import aocutils
+from WebGL import x3dom_renderer
+from OCC.BRep import BRep_Builder
+from OCC.TopoDS import TopoDS_Shape
+from OCC.BRepTools import breptools_Read
+    
 from OCC.gp import gp_Pnt, gp_OX, gp_Vec, gp_Trsf, gp_DZ, gp_Ax1, gp_Ax2, gp_Ax3
 from OCC.gp import gp_Pnt2d, gp_Dir2d, gp_Ax2d, gp_Dir
 from OCC.GC import GC_MakeArcOfCircle, GC_MakeSegment
@@ -25,6 +33,7 @@ from OCC.BRepBuilderAPI import BRepBuilderAPI_MakeFace
 from OCC.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCC.BRepBuilderAPI import BRepBuilderAPI_MakePolygon
 from OCC.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
+from OCC.BRepPrimAPI import BRepPrimAPI_MakeRevol
 from OCC.BRepPrimAPI import BRepPrimAPI_MakePrism, BRepPrimAPI_MakeCylinder
 from OCC.BRepFilletAPI import BRepFilletAPI_MakeFillet
 from OCC.BRepAlgoAPI import BRepAlgoAPI_Fuse
@@ -39,17 +48,28 @@ from OCC.TopExp import TopExp_Explorer
 from OCC.TopAbs import TopAbs_EDGE, TopAbs_FACE
 from OCC.TopTools import TopTools_ListOfShape
 import OCC.STEPControl as STEPControl
+from OCC.STEPCAFControl import STEPCAFControl_Writer
 from OCC.GProp import GProp_GProps
 from OCC.BRepGProp import (brepgprop_LinearProperties,
                            brepgprop_SurfaceProperties,
                            brepgprop_VolumeProperties)
 
-from OCC.Display.SimpleGui import *
+from OCC.Display.SimpleGui import init_display
 from OCC.TColgp import TColgp_Array1OfPnt
-import OCCUtils
 from OCCUtils.Common import GpropsFromShape
-from OCCUtils import Construct
-
+from OCCUtils import Construct,Common
+from OCC.TCollection import TCollection_ExtendedString
+from OCC.TDocStd import Handle_TDocStd_Document
+from OCC.XCAFApp import XCAFApp_Application
+from OCC.XCAFDoc import (XCAFDoc_DocumentTool_ShapeTool,
+                         XCAFDoc_DocumentTool_ColorTool,
+                         XCAFDoc_ColorGen)
+from OCC.TDF import TDF_LabelSequence
+from OCC.XSControl import XSControl_WorkSession
+from OCC.STEPControl import STEPControl_AsIs
+from OCC.BRepPrimAPI import BRepPrimAPI_MakeBox
+from STEP import StepOCAF_Export
+                                 
 sys.path.insert(0,r'D:/Code/Nova/nova/TF/geom')
 
 def add_line(point):
@@ -64,6 +84,7 @@ with open('D:/Code/Nova/Data/salome_input.json','r') as f:  # _S16L
 loop,cs,pf,nTF = data['p'],data['section'],data['pf'],data['nTF']
 color = data['color']
 PFsupport,CSsupport = data['PFsupport'],data['CSsupport']
+Gsupport,OISsupport = data['Gsupport'], data['OISsupport']
 
 w = []
 for segment in loop:
@@ -82,11 +103,12 @@ lower_curve = BRepBuilderAPI_MakeWire(w[3])
  # outboard loop
 dflat = (loop[1]['p3']['r']-loop[2]['p0']['r'])**2+\
 (loop[1]['p3']['z']-loop[2]['p0']['z'])**2
-if dflat > 0:
+if dflat > 1e-3:
     outboard_flat = add_line([loop[1]['p3'],loop[2]['p0']])
     outer_curve = BRepBuilderAPI_MakeWire(*[w[1],outboard_flat,w[2]])
-    full_curve = BRepBuilderAPI_MakeWire(*[w[0],w[1],outboard_flat,w[2],w[3],
-                                           inner_edge])
+    full_curve = BRepBuilderAPI_MakeWire(*[w[0],w[1],outboard_flat,w[2]])
+    full_curve = BRepBuilderAPI_MakeWire(full_curve.Wire(),w[3])
+    full_curve = BRepBuilderAPI_MakeWire(full_curve.Wire(),inner_edge)
 else:
     outer_curve = BRepBuilderAPI_MakeWire(*[w[1],w[2]])
     full_curve = BRepBuilderAPI_MakeWire(*[w[0],w[1],w[2],w[3]])
@@ -207,20 +229,255 @@ TFprofile['wp'] = {'upper':[wp_upper,wp_top],
 TFcurve = {'upper':upper_curve,'outer':outer_curve,'lower':lower_curve,
            'inner':inner_curve}
            
-#solid = {}   
-builder = TopoDS_Builder()
 TF = {}
 for part in TFprofile:
-    TF[part] = TopoDS_Compound()
-    builder.MakeCompound(TF[part])
+    segments = []
     for curve in TFprofile[part]:
         pipe = BRepFill_PipeShell(TFcurve[curve].Wire())
         for profile in TFprofile[part][curve]:
             pipe.Add(profile)
         pipe.Build()
-        pipe.MakeSolid()
-        builder.Add(TF[part],pipe.Shape())
-  
+        segments.append(pipe.Shape())
+    quilt = Construct.sew_shapes(segments)  #[::-1]
+    TF[part] = Construct.make_solid(quilt)
+    
+# outer inter-coil supports
+OISloop = [[] for i in range(2)]
+pnt = [[] for i in range(2)]
+OISface = [[] for i in range(2)] 
+yo = depth/2+side  # coil half thickness
+ro = yo/np.arctan(theta)  # radial offset
+
+for name in OISsupport:
+    OISloop[0] = BRepBuilderAPI_MakePolygon()  # inter-coil support
+    for node in OISsupport[name]:
+        pnt[0] = gp_Pnt(node[0],yo,node[1])
+        OISloop[0].Add(pnt[0])
+    OISloop[0].Close()
+    OISloop[0] = OISloop[0].Wire()  
+    OISloop[1] = BRepBuilderAPI_MakePolygon()  # inter-coil support
+    for node in OISsupport[name]:
+        r1 = node[0]-ro
+        dy = r1*np.sin(theta)
+        dr = dy*np.tan(theta)
+        #lc = r1*np.cos(theta)  # intercoil length
+        #r2 = lc*np.cos(theta)
+        #y2 = lc*np.sin(theta)
+        pnt[1] = gp_Pnt(node[0]-dr,yo+dy,node[1])
+        OISloop[1].Add(pnt[1])
+    OISloop[1].Close()
+    OISloop[1] = OISloop[1].Wire()  
+
+    path = Construct.make_line(pnt[0],pnt[1])
+    path = Construct.make_wire(path)
+    shell = BRepFill_PipeShell(path)
+    shell.Add(OISloop[0])
+    shell.Add(OISloop[1])
+    shell.Build()
+    for i in range(2):
+        OISface[i] = Construct.make_face(OISloop[i])
+    quilt = Construct.sew_shapes([shell.Shape(),OISface[0],OISface[1]])  # 
+    Lplate = Construct.make_solid(quilt)
+    
+    node = OISsupport[name][0]
+    Rplate = Construct.mirror_axe2(Lplate,gp_Ax2(gp_Pnt(node[0],0,node[1]),
+                                                 gp_Dir(0,1,0),gp_Dir(0,0,1)))
+    TF['case'] = Construct.boolean_fuse(TF['case'],Lplate) 
+    TF['case'] = Construct.boolean_fuse(TF['case'],Rplate)
+       
+# CS seat
+ztop,zo,dt = CSsupport['ztop'],CSsupport['zo'],CSsupport['dt']
+yfactor = 0.8
+rnode,ynode = [],[]
+for point in ['wp','nose']:
+    rnode.append(CSsupport['r{}'.format(point)])
+    ynode.append(CSsupport['y{}'.format(point)])
+    
+CSloop = BRepBuilderAPI_MakePolygon() # create CStop
+CSloop.Add(gp_Pnt(rnode[0],yfactor*ynode[0],ztop))
+CSloop.Add(gp_Pnt(rnode[1],yfactor*ynode[1],ztop))
+CSloop.Add(gp_Pnt(rnode[1],-yfactor*ynode[1],ztop))
+CSloop.Add(gp_Pnt(rnode[0],-yfactor*ynode[0],ztop))
+CSloop.Close()
+CSloop = CSloop.Wire()
+CSface = Construct.make_face(CSloop)
+CSbody = Construct.make_prism(CSface,Construct.gp_Vec(0,0,zo-ztop))
+CSbody = topods.Solid(CSbody)
+TF['case'] = Construct.boolean_fuse(TF['case'],CSbody)  # join seat to body
+
+# GS base
+node = Gsupport['base']
+rGS = np.mean([node[0][0],node[1][0]])
+GSwidth = node[1][0]-node[0][0]
+zGS = node[1][1]
+Gloop = BRepBuilderAPI_MakePolygon()
+for n in node:
+    Gloop.Add(gp_Pnt(n[0],-depth/2-side,n[1]))
+Gloop.Close()
+Gloop = Gloop.Wire()
+Gface = Construct.make_face(Gloop)
+Gbody = Construct.make_prism(Gface,Construct.gp_Vec(0,depth+2*side,0))
+Gbody = topods.Solid(Gbody)
+TF['case'] = Construct.boolean_fuse(TF['case'],Gbody)  # join seat to body
+
+Gax = Construct.gp_Ax1(gp_Pnt(rGS,0,zGS-GSwidth/2),gp_Dir(1,0,0))
+pin = Construct.gp_Circ()
+pin.SetRadius(GSwidth/4)
+pin.SetAxis(Gax)
+pin = Construct.make_edge(pin)
+pin = Construct.make_wire(pin)
+pin = Construct.make_face(pin)
+pin = Construct.make_prism(pin,Construct.gp_Vec(GSwidth,0,0))
+pin = Construct.translate_topods_from_vector(pin,
+                                             Construct.gp_Vec(-GSwidth/2,0,0))
+
+arc = GC_MakeArcOfCircle(gp_Pnt(rGS,-GSwidth/2,zGS-GSwidth/2),
+                         gp_Pnt(rGS,0,zGS-GSwidth),
+                         gp_Pnt(rGS,GSwidth/2,zGS-GSwidth/2))
+arc = Construct.make_edge(arc.Value())
+base = BRepBuilderAPI_MakePolygon()
+base.Add(gp_Pnt(rGS,-GSwidth/2,zGS-GSwidth/2))
+base.Add(gp_Pnt(rGS,-GSwidth/2,zGS))
+base.Add(gp_Pnt(rGS,GSwidth/2,zGS))
+base.Add(gp_Pnt(rGS,GSwidth/2,zGS-GSwidth/2))
+Gloop = Construct.make_wire([arc,base.Wire()])
+Gface = Construct.make_face(Gloop)
+Gbody = Construct.make_prism(Gface,Construct.gp_Vec(GSwidth/3,0,0))
+Gbody = topods.Solid(Gbody)
+Gtag = Construct.translate_topods_from_vector(Gbody,
+                                             Construct.gp_Vec(-GSwidth/6,0,0))
+Gbase = Construct.translate_topods_from_vector(Gtag,\
+        Construct.gp_Vec(-GSwidth/2+GSwidth/6,0,0))
+Gbase = Construct.boolean_fuse(Gbase,\
+                               Construct.translate_topods_from_vector(Gtag,\
+                               Construct.gp_Vec(+GSwidth/2-GSwidth/6,0,0)))
+Gbase = Construct.boolean_fuse(Gbase,pin)
+TF['case'] = Construct.boolean_fuse(TF['case'],Gbase)  # join GSbase to case
+
+Gtag = Construct.rotate(Gtag,Gax,180)   
+r2c = 1.5*GSwidth
+rtube,ttube = GSwidth/3,GSwidth/9  # GS leg radius, thickness
+rect = BRepBuilderAPI_MakePolygon()
+rect.Add(gp_Pnt(rGS-GSwidth/6,-GSwidth/2,zGS-GSwidth))
+rect.Add(gp_Pnt(rGS-GSwidth/6,GSwidth/2,zGS-GSwidth))
+rect.Add(gp_Pnt(rGS+GSwidth/6,GSwidth/2,zGS-GSwidth))
+rect.Add(gp_Pnt(rGS+GSwidth/6,-GSwidth/2,zGS-GSwidth))
+rect.Close()
+rect = rect.Wire()
+rect_face = Construct.make_face(rect)
+rpath = Construct.make_line(gp_Pnt(rGS,0,zGS-GSwidth),
+                           gp_Pnt(rGS,0,zGS-r2c))
+rpath = Construct.make_wire(rpath)
+circ = Construct.gp_Circ()
+circ.SetRadius(rtube)
+circ.SetAxis(Construct.gp_Ax1(gp_Pnt(rGS,0,zGS-r2c),gp_Dir(0,0,1)))
+circ = Construct.make_edge(circ)
+circ = Construct.make_wire(circ)
+circ_face = Construct.make_face(circ)
+
+circ_cut = Construct.gp_Circ()
+circ_cut.SetRadius(rtube-ttube)
+circ_cut.SetAxis(Construct.gp_Ax1(gp_Pnt(rGS,0,zGS-r2c),gp_Dir(0,0,1)))
+circ_cut = Construct.make_edge(circ_cut)
+circ_cut = Construct.make_wire(circ_cut)
+circ_face_cut = Construct.make_face(circ_cut)
+
+pipe = BRepFill_PipeShell(rpath)
+pipe.Add(rect)
+pipe.Add(circ)
+pipe.Build()
+quilt = Construct.sew_shapes([pipe.Shape(),rect_face,circ_face])  # 
+GStrans = Construct.make_solid(quilt)
+GStrans = Construct.boolean_fuse(GStrans,Gtag)
+GSt_upper = Construct.boolean_cut(GStrans,pin)  # make upper hole
+
+alpha = np.arctan((Gsupport['radius']*np.tan(theta)-GSwidth)/
+                     (Gsupport['zbase']-Gsupport['zfloor']-GSwidth/2))
+Pin2pin = np.sqrt((Gsupport['radius']*np.tan(theta)-GSwidth)**2+
+                     (Gsupport['zbase']-Gsupport['zfloor']-GSwidth/2)**2)
+
+tube_body = Construct.make_prism(circ_face,\
+            Construct.gp_Vec(0,0,-(Pin2pin+GSwidth-2*r2c)))
+tube_body = topods.Solid(tube_body)
+
+tube_body_cut = Construct.make_prism(circ_face_cut,\
+                Construct.gp_Vec(0,0,-(Pin2pin+GSwidth-2*r2c)))
+tube_body_cut = topods.Solid(tube_body_cut)
+tube_body = Construct.boolean_cut(tube_body,tube_body_cut)
+
+GSt_lower = Construct.rotate(GSt_upper,Gax,180)
+GSt_lower = Construct.translate_topods_from_vector(GSt_lower,\
+            Construct.gp_Vec(0,0,-Pin2pin))
+GSt_lower = Construct.rotate(GSt_lower,\
+            Construct.gp_Ax1(gp_Pnt(rGS,0,zGS),gp_Dir(0,0,1)),90)
+
+leg = Construct.boolean_fuse(GSt_upper,tube_body)
+leg = Construct.boolean_fuse(leg,GSt_lower)
+leftleg = Construct.rotate(leg,Gax,-alpha*180/np.pi)
+rightleg = Construct.rotate(leg,Gax,alpha*180/np.pi)
+GSstrut = Construct.boolean_fuse(leftleg,rightleg)
+
+# lower pin y-axis
+circ = Construct.gp_Circ()
+circ.SetRadius(rtube-ttube)
+circ.SetAxis(Construct.gp_Ax1(gp_Pnt(rGS,-Gsupport['radius']*np.tan(theta),
+                                     Gsupport['zfloor']),gp_Dir(0,1,0)))
+circ = Construct.make_edge(circ)
+circ = Construct.make_wire(circ)
+circ_face = Construct.make_face(circ)
+lower_pin = Construct.make_prism(circ_face,\
+            Construct.gp_Vec(0,2*Gsupport['radius']*np.tan(theta),0))
+lower_pin = topods.Solid(lower_pin)
+
+PFsup = {'dt':side,'n':3}
+for name in PFsupport:
+    PFSloop = BRepBuilderAPI_MakePolygon()  # PF support
+    for node in PFsupport[name]:
+        PFSloop.Add(gp_Pnt(node[0],0,node[1]))
+    PFSloop.Close()
+    PFSloop = PFSloop.Wire()
+    PFSface = Construct.make_face(PFSloop)
+    PFSbody = Construct.make_prism(PFSface,Construct.gp_Vec(0,PFsup['dt'],0))
+    PFSbody = Construct.translate_topods_from_vector(PFSbody,\
+    Construct.gp_Vec(0,-PFsup['dt']/2,0))
+    if PFsup['n'] > 1:
+        rnode = PFsupport[name][0][0]
+        if rnode < loop[0]['p3']['r']:
+            shift = ynose+(depth/2+side-ynose)*\
+            math.acos((loop[0]['p3']['r']-rnode)/
+                        (loop[0]['p3']['r']-loop[0]['p0']['r']
+                         +width+nose+inboard))/(math.pi/2)
+        else:
+            shift = depth/2+side
+        PFSbody = Construct.translate_topods_from_vector(PFSbody,\
+        Construct.gp_Vec(0,-shift+PFsup['dt']/2,0))    
+        space = (2*shift-PFsup['dt'])/(PFsup['n']-1)
+        ribs = PFSbody
+        for i in np.arange(1,PFsup['n']):
+            PFSbody = Construct.translate_topods_from_vector(PFSbody,\
+            Construct.gp_Vec(0,space,0))
+            ribs = Construct.boolean_fuse(ribs,PFSbody)
+            #ribs.append(PFSbody)
+    PFSloop = BRepBuilderAPI_MakePolygon()  # PF support
+    for node,so in zip(PFsupport[name][:2],[1,-1]):
+        for s1 in [1,-1]:
+            PFSloop.Add(gp_Pnt(node[0],so*s1*shift,node[1]))
+    PFSloop.Close()
+    PFSloop = PFSloop.Wire()
+    PFSface = Construct.make_face(PFSloop)
+    if PFsupport[name][0][1] > PFsupport[name][2][1]:
+        sign = -1
+    else:
+        sign = 1
+    vector = np.array(PFsupport[name][2])-np.array(PFsupport[name][1])
+    vector /= np.linalg.norm(vector) 
+    vector *= PFsup['dt']  # sign*
+    PFSbody = Construct.make_prism(PFSface,
+                                   Construct.gp_Vec(vector[0],0,vector[1]))  
+    ribs = Construct.boolean_fuse(ribs,PFSbody)
+    TF['case'] = Construct.boolean_fuse(TF['case'],ribs)  # join seat to body 
+TF['case'] = Construct.boolean_cut(TF['case'],TF['wp'])
+
 TFcage = {}
 rotate = gp_Trsf()
 axis = gp_Ax1(gp_Pnt(0,0,0),gp_Dir(0,0,1))
@@ -228,21 +485,49 @@ angle = 2*np.pi/nTF
 rotate.SetRotation(axis,angle)
 
 for part in TFprofile:
-    TFcage[part] = TopoDS_Compound()
-    builder.MakeCompound(TFcage[part])
-    stamp = TF[part]
+    stamp,compound = TF[part],[]
     for i in range(nTF):
         stamp = BRepBuilderAPI_Transform(stamp,rotate).Shape()
-        builder.Add(TFcage[part],stamp)
+        compound.append(stamp)
+    TFcage[part] = Construct.compound(compound) 
         
-        
-#a = Construct.make_polygon([[0,0],[0,5],[5,5],[5,0]],closed=True)
+stamp,compound = GSstrut,[]    
+for i in range(nTF):
+    stamp = BRepBuilderAPI_Transform(stamp,rotate).Shape()
+    compound.append(stamp)
+GScage = Construct.compound(compound) 
+    
+PFcoil = []
+for i in range(len(pf)):
+    c = color[i+1]
+    PFloop = BRepBuilderAPI_MakePolygon() # create CStop
+    coil = 'Coil{:d}'.format(i)
+    r,z = pf[coil]['r'],pf[coil]['z']
+    dr,dz = pf[coil]['dr'],pf[coil]['dz']
+    for sr,sz in zip([-1,1,1,-1],[-1,-1,1,1]):
+        PFloop.Add(gp_Pnt(sr/2*dr,0,sz/2*dz))
+    PFloop.Close()
+    PFloop = Construct.translate_topods_from_vector(PFloop.Wire(),
+                                                    Construct.gp_Vec(r,0,z))
+    PFface = Construct.make_face(PFloop)
+    ax = gp_Ax1(gp_Pnt(0,0,0),gp_Dir(0,0,1))
+    PFcoil.append(BRepPrimAPI_MakeRevol(PFface,ax).Shape())
+PFcage = Construct.compound(PFcoil) 
 
 
+x3d = Construct.compound([TFcage['wp'],TFcage['case'],PFcage,GScage]) 
+my_renderer = x3dom_renderer.X3DomRenderer()
+my_renderer.DisplayShape(x3d)
+
+''' 
+       
 # Export to STEP
-step_export = STEPControl.STEPControl_Writer()
-step_export.Transfer(TFcage['case'],STEPControl.STEPControl_AsIs)
-step_export.Write('TF.stp')
+from OCCDataExchange import step_ocaf
+export = step_ocaf.StepOcafExporter('./TF_{:d}.stp'.format(nTF))
+export.add_shape(TF['wp'],color=colors[0],layer='winding_pack')
+export.add_shape(TF['case'],color=colors[1],layer='case')
+export.add_shape(GSstrut,color=colors[2],layer='gravity_support')
+export.write_file()
 
 prop = GpropsFromShape(TF['case'])
 print('gprop',prop.volume().Mass())
@@ -259,127 +544,9 @@ prop = GProp_GProps()
 brepgprop_VolumeProperties(TFcage['wp'],prop,1e-6)
 print('cold mass volume',prop.Mass())
 
-
-
 display,start_display = init_display()[:2]
-display.DisplayColoredShape(TFcage['case'],'BLUE')
-display.DisplayColoredShape(TFcage['wp'],'RED')
-display.DisplayColoredShape(case_mid,'BLUE')
-display.DisplayColoredShape(full_curve.Wire(),'BLUE')
-#display.DisplayColoredShape(shell['case']['comp'].Shape(),'RED')
-
-
-#rgba = list(colors[0])
-#rgba.append(0)  # add alpha
-#display.DisplayColoredShape(myBody,Quantity_Color(*rgba))
+display.DisplayColoredShape(TFcage['case'],QC[0])
+display.DisplayColoredShape(GScage,QC[1])
+display.DisplayColoredShape(PFcage,QC[5])
 start_display()
-
-'''
-
-
-OY = geompy.MakeVectorDXDYDZ(0,1,0) 
-OZ = geompy.MakeVectorDXDYDZ(0,0,1)   
-ztop,zo,dt = CSsupport['ztop'],CSsupport['zo'],CSsupport['dt']
-rnode,ynode = [],[]
-for point in ['wp','nose']:
-    rnode.append(CSsupport['r{}'.format(point)])
-    ynode.append(CSsupport['y{}'.format(point)])
-vseat = []
-for sign in [-1,1]:  
-    v = []
-    v.append(geompy.MakeVertex(rnode[0],sign*ynode[0],ztop))
-    v.append(geompy.MakeVertex(rnode[1],sign*ynode[1],ztop))
-    vseat.append(v[::sign])
-    v.append(geompy.MakeVertex(rnode[1],sign*ynode[1]-sign*dt,ztop))
-    v.append(geompy.MakeVertex(rnode[0],sign*ynode[0]-sign*dt,ztop))
-    v.append(v[0])
-    support_loop = geompy.MakePolyline(v)
-    face = geompy.MakeFaceWires([support_loop],1)
-    solid = geompy.MakePrismVecH(face,OZ,-0.999*(ztop-zo))
-    shell['case']['solid'] = geompy.MakeFuseList([shell['case']['solid'],
-                                                  solid],True,True)
-vseat.append(vseat[0])
-seat_loop = geompy.MakePolyline(vseat)
-face = geompy.MakeFaceWires([seat_loop],1)
-solid = geompy.MakePrismVecH(face,OZ,-dt)
-shell['case']['solid'] = geompy.MakeFuseList([shell['case']['solid'],solid],
-                                             True,True)
-
-PFsup = {'dt':side,'n':2}
-for name in PFsupport:
-    v = []
-    for node in PFsupport[name]:
-        vertex = geompy.MakeVertex(node[0],0,node[1])
-        v.append(vertex)
-    v.append(v[0])
-    support_loop = geompy.MakePolyline(v)
-    face = geompy.MakeFaceWires([support_loop],1)
-    solid = geompy.MakePrismVecH2Ways(face,OY,PFsup['dt']/2)
-    if PFsup['n'] > 1:
-        rnode = PFsupport[name][0][0]
-        if rnode < loop[0]['p3']['r']:
-            shift = ynose+(depth/2+side-ynose)*\
-            math.acos((loop[0]['p3']['r']-rnode)/
-                        (loop[0]['p3']['r']-loop[0]['p0']['r']))/(math.pi/2)
-        else:
-            shift = depth/2+side
-        solid = geompy.MakeTranslation(solid,0,-shift+PFsup['dt']/2,0)
-        space = (2*shift-PFsup['dt'])/(PFsup['n']-1)
-        solid = geompy.MakeMultiTranslation1D(solid,OY,space,PFsup['n'])                                               
-        shell['case']['solid'] = geompy.MakeFuseList([shell['case']['solid'],
-                                                     solid],True,True)
-
-    v = []
-    for node,so in zip(PFsupport[name][:2],[1,-1]):
-        for s1 in [1,-1]:
-            vertex = geompy.MakeVertex(node[0],so*s1*shift,node[1])
-            v.append(vertex)
-    v.append(v[0])
-    support_loop = geompy.MakePolyline(v)
-    face = geompy.MakeFaceWires([support_loop],1)
-    if PFsupport[name][0][1] > PFsupport[name][2][1]:
-        sign = -1
-    else:
-        sign = 1
-    solid = geompy.MakePrismVecH(face,OZ,sign*PFsup['dt'])
-    shell['case']['solid'] = geompy.MakeFuseList([shell['case']['solid'],
-                                                     solid],True,True)
-
-#shell['case']['solid'] = geompy.MakeCutList(shell['case']['solid'],\
-#[shell['wp']['solid']],True)
-
-for p in profiles:
-    solid_id = geompy.addToStudy(shell[p]['solid'],'{}_solid'.format(p))
-    gg.createAndDisplayGO(solid_id)
-   
-mag_part = geompy.MakeCompound([shell['wp']['solid'],shell['case']['solid']])
-mag_part_id = geompy.addToStudy(mag_part,'TF')
-gg.createAndDisplayGO(mag_part_id)
-    
-TF_cage = geompy.MultiRotate1DNbTimes(mag_part,None,nTF)
-c = color[0]
-TF_cage.SetColor(SALOMEDS.Color(c[0],c[1],c[2]))
-rotate_id = geompy.addToStudy(TF_cage,'TF_cage')
-gg.createAndDisplayGO(rotate_id)
-
-coil_set = [TF_cage]
-for i in range(len(pf)):
-    c = color[i+1]
-    coil = 'Coil{:d}'.format(i)
-    coil_face = geompy.MakeFaceHW(pf[coil]['dz'],pf[coil]['dr'],3)
-    coil_face = geompy.MakeTranslation(coil_face,
-                                       pf[coil]['r'],0,pf[coil]['z'])
-    coil = geompy.MakeRevolution(coil_face,OZ,360*math.pi/180.0)
-    coil.SetColor(SALOMEDS.Color(c[0],c[1],c[2]))
-    coil_set.append(coil)
-    coil_id = geompy.addToStudy(coil,'coil_{:d}'.format(i))
-    gg.createAndDisplayGO(coil_id)
- 
-coil_set = geompy.MakeCompound(coil_set)
-geompy.addToStudy(coil_set,'coil_set')
-geompy.ExportSTEP(coil_set,'D:/Code/Nova/nova/TF/geom/coil_set.step',
-                  GEOM.LU_METER)
-
-if salome.sg.hasDesktop():
-  salome.sg.updateObjBrowser(1)
 '''
