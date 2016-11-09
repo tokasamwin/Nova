@@ -9,66 +9,26 @@ QC = [[] for i in range(len(colors))]
 for i,c in enumerate(colors):
     QC[i] = Quantity_Color(*c,Quantity_TOC_RGB)
     QC[i].ChangeIntensity(-50)
-
-import aocutils
-from WebGL import x3dom_renderer
-from OCC.BRep import BRep_Builder
-from OCC.TopoDS import TopoDS_Shape
-from OCC.BRepTools import breptools_Read
     
-from OCC.gp import gp_Pnt, gp_OX, gp_Vec, gp_Trsf, gp_DZ, gp_Ax1, gp_Ax2, gp_Ax3
-from OCC.gp import gp_Pnt2d, gp_Dir2d, gp_Ax2d, gp_Dir
-from OCC.GC import GC_MakeArcOfCircle, GC_MakeSegment
-from OCC.GCE2d import GCE2d_MakeSegment
-from OCC.Geom import Geom_Plane, Geom_CylindricalSurface, Handle_Geom_Plane 
-from OCC.Geom import Handle_Geom_Surface, Geom_BezierCurve
-from OCC.GeomFill import GeomFill_Pipe
+import aocxchange
+from OCC.Display.WebGl import x3dom_renderer
+from OCC.gp import gp_Pnt, gp_Trsf, gp_Ax1, gp_Ax2
+from OCC.gp import gp_Dir
+from OCC.GC import GC_MakeArcOfCircle
+from OCC.Geom import Geom_BezierCurve
 from OCC.BRepFill import BRepFill_PipeShell
-from OCC.GeomAPI import GeomAPI_PointsToBSpline
-from OCC.Geom2d import Geom2d_Ellipse, Geom2d_TrimmedCurve, Geom2d_BezierCurve
-from OCC.Geom2d import Handle_Geom2d_Ellipse, Handle_Geom2d_Curve
 from OCC.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
 from OCC.BRepBuilderAPI import BRepBuilderAPI_MakeWire
-from OCC.BRepBuilderAPI import BRepBuilderAPI_MakeFace
 from OCC.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCC.BRepBuilderAPI import BRepBuilderAPI_MakePolygon
-from OCC.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
 from OCC.BRepPrimAPI import BRepPrimAPI_MakeRevol
-from OCC.BRepPrimAPI import BRepPrimAPI_MakePrism, BRepPrimAPI_MakeCylinder
-from OCC.BRepFilletAPI import BRepFilletAPI_MakeFillet
-from OCC.BRepAlgoAPI import BRepAlgoAPI_Fuse
-from OCC.BRepOffsetAPI import BRepOffsetAPI_MakeThickSolid 
-from OCC.BRepOffsetAPI import BRepOffsetAPI_ThruSections
-from OCC.BRepOffsetAPI import BRepOffsetAPI_MakePipeShell
-from OCC.BRepLib import breplib
-from OCC.BRep import BRep_Tool_Surface, BRep_Builder
-from OCC.TopoDS import topods, TopoDS_Edge, TopoDS_Compound, TopoDS_Solid
-from OCC.TopoDS import TopoDS_Builder
-from OCC.TopExp import TopExp_Explorer
-from OCC.TopAbs import TopAbs_EDGE, TopAbs_FACE
-from OCC.TopTools import TopTools_ListOfShape
-import OCC.STEPControl as STEPControl
-from OCC.STEPCAFControl import STEPCAFControl_Writer
+from OCC.TopoDS import topods
 from OCC.GProp import GProp_GProps
-from OCC.BRepGProp import (brepgprop_LinearProperties,
-                           brepgprop_SurfaceProperties,
-                           brepgprop_VolumeProperties)
-
+from OCC.BRepGProp import brepgprop_VolumeProperties
 from OCC.Display.SimpleGui import init_display
 from OCC.TColgp import TColgp_Array1OfPnt
 from OCCUtils.Common import GpropsFromShape
-from OCCUtils import Construct,Common
-from OCC.TCollection import TCollection_ExtendedString
-from OCC.TDocStd import Handle_TDocStd_Document
-from OCC.XCAFApp import XCAFApp_Application
-from OCC.XCAFDoc import (XCAFDoc_DocumentTool_ShapeTool,
-                         XCAFDoc_DocumentTool_ColorTool,
-                         XCAFDoc_ColorGen)
-from OCC.TDF import TDF_LabelSequence
-from OCC.XSControl import XSControl_WorkSession
-from OCC.STEPControl import STEPControl_AsIs
-from OCC.BRepPrimAPI import BRepPrimAPI_MakeBox
-from STEP import StepOCAF_Export
+from OCCUtils import Construct
                                  
 sys.path.insert(0,r'D:/Code/Nova/nova/TF/geom')
 
@@ -79,7 +39,7 @@ def add_line(point):
     edge = BRepBuilderAPI_MakeEdge(p[0],p[1]).Edge()
     return edge
 
-with open('D:/Code/Nova/Data/salome_input.json','r') as f:  # _S16L
+with open('../../../Data/salome_input.json','r') as f:  # _S16L
     data = json.load(f)
 loop,cs,pf,nTF = data['p'],data['section'],data['pf'],data['nTF']
 color = data['color']
@@ -238,9 +198,9 @@ for part in TFprofile:
             pipe.Add(profile)
         pipe.Build()
         segments.append(pipe.Shape())
-    quilt = Construct.sew_shapes(segments)  #[::-1]
+    quilt = Construct.sew_shapes(segments[::-1])  #]
     TF[part] = Construct.make_solid(quilt)
-    
+
 # outer inter-coil supports
 OISloop = [[] for i in range(2)]
 pnt = [[] for i in range(2)]
@@ -260,9 +220,6 @@ for name in OISsupport:
         r1 = node[0]-ro
         dy = r1*np.sin(theta)
         dr = dy*np.tan(theta)
-        #lc = r1*np.cos(theta)  # intercoil length
-        #r2 = lc*np.cos(theta)
-        #y2 = lc*np.sin(theta)
         pnt[1] = gp_Pnt(node[0]-dr,yo+dy,node[1])
         OISloop[1].Add(pnt[1])
     OISloop[1].Close()
@@ -284,7 +241,7 @@ for name in OISsupport:
                                                  gp_Dir(0,1,0),gp_Dir(0,0,1)))
     TF['case'] = Construct.boolean_fuse(TF['case'],Lplate) 
     TF['case'] = Construct.boolean_fuse(TF['case'],Rplate)
-       
+          
 # CS seat
 ztop,zo,dt = CSsupport['ztop'],CSsupport['zo'],CSsupport['dt']
 yfactor = 0.8
@@ -429,6 +386,7 @@ lower_pin = Construct.make_prism(circ_face,\
             Construct.gp_Vec(0,2*Gsupport['radius']*np.tan(theta),0))
 lower_pin = topods.Solid(lower_pin)
 
+
 PFsup = {'dt':side,'n':3}
 for name in PFsupport:
     PFSloop = BRepBuilderAPI_MakePolygon()  # PF support
@@ -473,8 +431,9 @@ for name in PFsupport:
     vector /= np.linalg.norm(vector) 
     vector *= PFsup['dt']  # sign*
     PFSbody = Construct.make_prism(PFSface,
-                                   Construct.gp_Vec(vector[0],0,vector[1]))  
-    ribs = Construct.boolean_fuse(ribs,PFSbody)
+                                   Construct.gp_Vec(vector[0],0,vector[1]))
+    
+    ribs = Construct.boolean_fuse(PFSbody,ribs)
     TF['case'] = Construct.boolean_fuse(TF['case'],ribs)  # join seat to body 
 TF['case'] = Construct.boolean_cut(TF['case'],TF['wp'])
 
@@ -514,18 +473,15 @@ for i in range(len(pf)):
     PFcoil.append(BRepPrimAPI_MakeRevol(PFface,ax).Shape())
 PFcage = Construct.compound(PFcoil) 
 
-
 x3d = Construct.compound([TFcage['wp'],TFcage['case'],PFcage,GScage]) 
 my_renderer = x3dom_renderer.X3DomRenderer()
 my_renderer.DisplayShape(x3d)
-
-''' 
        
 # Export to STEP
-from OCCDataExchange import step_ocaf
+from aocxchange import step_ocaf
 export = step_ocaf.StepOcafExporter('./TF_{:d}.stp'.format(nTF))
 export.add_shape(TF['wp'],color=colors[0],layer='winding_pack')
-export.add_shape(TF['case'],color=colors[1],layer='case')
+export.add_shape(topods.Compound(TF['case']),color=colors[1],layer='case')
 export.add_shape(GSstrut,color=colors[2],layer='gravity_support')
 export.write_file()
 
@@ -548,5 +504,5 @@ display,start_display = init_display()[:2]
 display.DisplayColoredShape(TFcage['case'],QC[0])
 display.DisplayColoredShape(GScage,QC[1])
 display.DisplayColoredShape(PFcage,QC[5])
+display.FitAll()
 start_display()
-'''
