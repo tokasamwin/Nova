@@ -29,6 +29,8 @@ from OCC.Display.SimpleGui import init_display
 from OCC.TColgp import TColgp_Array1OfPnt
 from OCCUtils.Common import GpropsFromShape
 from OCCUtils import Construct
+from OCC import UnitsAPI
+UnitsAPI.unitsapi_SetCurrentUnit('LENGTH','meter')
                                  
 sys.path.insert(0,r'D:/Code/Nova/nova/TF/geom')
 
@@ -473,11 +475,17 @@ for i in range(len(pf)):
     PFcoil.append(BRepPrimAPI_MakeRevol(PFface,ax).Shape())
 PFcage = Construct.compound(PFcoil) 
 
-x3d = Construct.compound([TFcage['wp'],TFcage['case'],PFcage,GScage]) 
-my_renderer = x3dom_renderer.X3DomRenderer()
-my_renderer.DisplayShape(x3d)
+#x3d = Construct.compound([TFcage['wp'],TFcage['case'],PFcage,GScage]) 
+#my_renderer = x3dom_renderer.X3DomRenderer()
+#my_renderer.DisplayShape(x3d)
        
 # Export to STEP
+scale = gp_Trsf()  # to mm
+scale.SetScaleFactor(1000)
+TF['wp'] = BRepBuilderAPI_Transform(TF['wp'],scale).Shape()
+TF['case'] = BRepBuilderAPI_Transform(TF['case'],scale).Shape()
+GSstrut = BRepBuilderAPI_Transform(GSstrut,scale).Shape()
+
 from aocxchange import step_ocaf
 export = step_ocaf.StepOcafExporter('./TF_{:d}.stp'.format(nTF))
 export.add_shape(TF['wp'],color=colors[0],layer='winding_pack')
