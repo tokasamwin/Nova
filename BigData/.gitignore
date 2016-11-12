@@ -1,4 +1,5 @@
-*
+# ignore large packages
+*.pkl
 !.gitignore
 !README
 
