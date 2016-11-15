@@ -200,7 +200,7 @@ for part in TFprofile:
             pipe.Add(profile)
         pipe.Build()
         segments.append(pipe.Shape())
-    quilt = Construct.sew_shapes(segments[::-1])  #]
+    quilt = Construct.sew_shapes(segments[::-1])  #
     TF[part] = Construct.make_solid(quilt)
 
 # outer inter-coil supports
@@ -479,19 +479,7 @@ PFcage = Construct.compound(PFcoil)
 #my_renderer = x3dom_renderer.X3DomRenderer()
 #my_renderer.DisplayShape(x3d)
        
-# Export to STEP
-scale = gp_Trsf()  # to mm
-scale.SetScaleFactor(1000)
-TF['wp'] = BRepBuilderAPI_Transform(TF['wp'],scale).Shape()
-TF['case'] = BRepBuilderAPI_Transform(TF['case'],scale).Shape()
-GSstrut = BRepBuilderAPI_Transform(GSstrut,scale).Shape()
 
-from aocxchange import step_ocaf
-export = step_ocaf.StepOcafExporter('./TF_{:d}.stp'.format(nTF))
-export.add_shape(TF['wp'],color=colors[0],layer='winding_pack')
-export.add_shape(topods.Compound(TF['case']),color=colors[1],layer='case')
-export.add_shape(GSstrut,color=colors[2],layer='gravity_support')
-export.write_file()
 
 prop = GpropsFromShape(TF['case'])
 print('gprop',prop.volume().Mass())
@@ -514,3 +502,17 @@ display.DisplayColoredShape(GScage,QC[1])
 display.DisplayColoredShape(PFcage,QC[5])
 display.FitAll()
 start_display()
+
+# Export to STEP
+scale = gp_Trsf()  # to mm
+scale.SetScaleFactor(1000)
+TF['wp'] = BRepBuilderAPI_Transform(TF['wp'],scale).Shape()
+TF['case'] = BRepBuilderAPI_Transform(TF['case'],scale).Shape()
+GSstrut = BRepBuilderAPI_Transform(GSstrut,scale).Shape()
+
+from aocxchange import step_ocaf
+export = step_ocaf.StepOcafExporter('./TF_{:d}.stp'.format(nTF))
+export.add_shape(TF['wp'],color=colors[0],layer='winding_pack')
+export.add_shape(topods.Compound(TF['case']),color=colors[1],layer='case')
+export.add_shape(GSstrut,color=colors[2],layer='gravity_support')
+export.write_file()
