@@ -15,6 +15,7 @@ from DEMOxlsx import DEMO
 from amigo import geom
 from amigo.ANSYS import table
 from nova.force import force_feild
+import sys
 
 class SALOME(object):
     
@@ -33,10 +34,10 @@ class SALOME(object):
         self.PF_support()  # calculate PF support seats
         self.CS_support()  # calculate CS support seats
         self.Gravity_support()
-        self.cage = coil_cage(nTF=nTF,rc=self.tf.rc,
+        self.cage = coil_cage(nTF=nTF,rc=self.tf.rc,ny=3,
                               plasma={'config':config['eq']},
                               coil=self.tf.x['cl'])
-        self.eq = EQ(self.sf,self.pf,dCoil=1.0,sigma=0,
+        self.eq = EQ(self.sf,self.pf,dCoil=0.5,sigma=0,
                      boundary=self.sf.get_sep(expand=0.5),n=1e3) 
         self.eq.plasma()
         self.ff = force_feild(self.pf.index,self.pf.coil,
@@ -182,17 +183,6 @@ class SALOME(object):
         self.tf.loop_interpolators(offset=0)  # construct TF interpolators
         TFloop = self.tf.fun['cl']
         self.OISsupport = {}
-        '''
-        for coil in self.PFsupport:
-            node = self.PFsupport[coil]
-            r = np.mean([node[2][0],node[3][0]])
-            z = np.mean([node[2][1],node[3][1]])
-            if r>rmin:# and ('Coil1' in coil or 'Coil4' in coil):
-                L = minimize_scalar(SALOME.OIS_placment,method='bounded',
-                                args=(TFloop,(r,z)),bounds=[0,1]).x
-                nodes = self.draw_OIS(L,width,thickness,TFloop)                    
-                self.OISsupport[coil] = nodes
-        '''
         for i,(L,width) in enumerate(zip([0.4,0.64],[4.5,2.5])):
             nodes = self.draw_OIS(L,width,thickness,TFloop)                    
             self.OISsupport['OIS{:d}'.format(i)] = nodes
@@ -200,6 +190,7 @@ class SALOME(object):
     def plot(self):
         self.tf.fill()
         self.pf.plot(coils=self.pf.coil,label=True,current=True)
+        self.pf.plot(coils=self.eq.coil,plasma=True)
         for name in self.PFsupport:
             nodes = np.array(self.PFsupport[name])
             geom.polyfill(nodes[:,0],nodes[:,1],color=0.4*np.ones(3))
@@ -219,7 +210,7 @@ class SALOME(object):
         zCS = [zo,zo,ztop,ztop]
         geom.polyfill(rCS,zCS,color=0.4*np.ones(3))
         
-    def ansys(self,plot=False):
+    def ansys(self,plot=False,nl=250,nr=5,ny=5):
         filename = '../../Data/TFload_{:d}'.format(self.nTF)
         ans = table(filename)
         ans.f.write('! loading tables for {:d}TF coil concept\n'.format(self.nTF))
@@ -245,14 +236,14 @@ class SALOME(object):
         TFloop = self.tf.fun['cl']
         
         ngrid = {'nr':20,'nt':150} #  coordinate interpolation grid
-        ndata = {'nl':250,'nr':5,'ny':5} #  coordinate interpolation grid
-        l = np.linspace(0,1,250)
+        ndata = {'nl':nl,'nr':nr,'ny':ny} #  coordinate interpolation grid
+        l = np.linspace(0,1,250)  # calculate grid extent
         xin,zin = self.tf.fun['in']['r'](l),self.tf.fun['in']['z'](l)
         rin = np.sqrt((xin-self.sf.mo[0])**2+(zin-self.sf.mo[1])**2)
-        rmin = np.min(rin)
+        rmin = np.min(rin)  # minimum radius
         xout,zout = self.tf.fun['out']['r'](l),self.tf.fun['out']['z'](l)
         rout = np.sqrt((xout-self.sf.mo[0])**2,(zout-self.sf.mo[1])**2)
-        rmax = np.max(rout)
+        rmax = np.max(rout)  # maximum radius
 
         radius = np.linspace(rmin,rmax,ngrid['nr'])
         theta = np.linspace(-np.pi,np.pi,ngrid['nt'])
@@ -287,28 +278,34 @@ class SALOME(object):
         
         self.tf.loop_interpolators(offset=0,full=True)  # centreline
         Jturn = self.cage.Iturn/cross_section
-        for i,l in enumerate(l_data):   
-            print(i)
+        for i,l in enumerate(l_data): 
+            iter_str = '\rcalculating TF body force:'
+            iter_str += 'segment {:d} of {:d}'.format(i,ndata['nl'])
+            sys.stdout.write(iter_str)
+            sys.stdout.flush()
             xo = self.tf.fun['cl']['r'](l)
             zo = self.tf.fun['cl']['z'](l)
             dxo = self.tf.fun['cl']['dr'](l)
             dzo = self.tf.fun['cl']['dz'](l)
-            nhat = np.array([dxo,0,dzo])
-            nhat /= np.linalg.norm(nhat)
-            that = np.array([nhat[2],0,-nhat[0]])
+            that = np.array([dxo,0,dzo])
+            that /= np.linalg.norm(that)
+            J = Jturn*that  # current density vector
+            nhat = np.array([that[2],0,-that[0]])
             for j,dr in enumerate(dr_data):
                 for k,dy in enumerate(dy_data):
                     point = np.array([xo,dy,zo])+dr*nhat
-                    J = Jturn*nhat  # current density vector
                     Fb = self.ff.topple(point,J,self.cage,self.eq.Bpoint,
-                                           method='BS')  # body force
+                                        method='BS')  # body force
                     for m,var in enumerate(['x','y','z']):  # store
                         Fbody[var][i,j,k] = Fb[m]
                     if plot:
-                        Fvec = Fb/2*np.linalg.norm(Fb)
+                        Fvec = Fb/np.linalg.norm(Fb)
+                        Fvec = that
                         pl.arrow(point[0],point[2],Fvec[0],Fvec[2],
-                                 head_width=0.15,head_length=0.3) 
-        print(np.sum(Fbody['x'])*1e-9,np.sum(Fbody['y'])*1e-9,np.sum(Fbody['z'])*1e-9)
+                                 head_width=0.15,head_length=0.3)       
+        print('\n',np.sum(Fbody['x'][:-1,:,:])*1e-9,
+              np.sum(Fbody['y'][:-1,:,:])*1e-9,
+              np.sum(Fbody['z'][:-1,:,:])*1e-9)
 
         ans.f.write('\n! parametric coil length, fn(theta)\n')
         ans.load('l_map',l_map,[radius,theta])
@@ -375,20 +372,30 @@ allsel
         
 if __name__ is '__main__':
     
-    nPF,nTF = 3,13
-    config = {'TF':'SN','eq':'SN_{:d}PF_{:d}TF'.format(nPF,nTF)}
+    #nPF,nTF = 3,13
+    #config = {'TF':'SN','eq':'SN_{:d}PF_{:d}TF'.format(nPF,nTF)}
+
+    nTF,nPF,nCS = 18,4,1
+    #config = {'TF':'NTP','eq':'SN'}
+
+    config = {'TF':'dtt','eq':'SN'}
+    config['TF'] = '{}{}{:d}'.format(config['eq'],config['TF'],nTF)
+    config['eq'] = 'SNdtt{:d}_{:d}PF_{:d}CS'.format(nTF,nPF,nCS)
+
     sal = SALOME(config,nTF=nTF)
     
     sal.OIS()
     sal.write()
-    #sal.ansys()
+    sal.ansys(plot=True,nl=50,nr=1,ny=3)
     sal.plot()
+    
+    '''
     demo = DEMO()
     demo.fill_part('Vessel')
     demo.fill_part('Blanket')
     demo.plot_ports()
   
-    '''
+    
     rp,zp = demo.port['P4']['right']['r'],demo.port['P4']['right']['z']
 
     pl.plot(rp,zp,'k',lw=3)

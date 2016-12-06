@@ -11,6 +11,7 @@ for i,c in enumerate(colors):
     QC[i].ChangeIntensity(-50)
     
 import aocxchange
+from collections import OrderedDict
 from OCC.Display.WebGl import x3dom_renderer
 from OCC.gp import gp_Pnt, gp_Trsf, gp_Ax1, gp_Ax2
 from OCC.gp import gp_Dir
@@ -31,6 +32,7 @@ from OCCUtils.Common import GpropsFromShape
 from OCCUtils import Construct
 from OCC import UnitsAPI
 UnitsAPI.unitsapi_SetCurrentUnit('LENGTH','meter')
+from amigo.IO import trim_dir
                                  
 sys.path.insert(0,r'D:/Code/Nova/nova/TF/geom')
 
@@ -40,8 +42,9 @@ def add_line(point):
         p.append(gp_Pnt(point[i]['r'],0,point[i]['z']))
     edge = BRepBuilderAPI_MakeEdge(p[0],p[1]).Edge()
     return edge
-
-with open('../../../Data/salome_input.json','r') as f:  # _S16L
+    
+datadir = trim_dir('../../../Data/') 
+with open(datadir+'occ_input.json','r') as f:
     data = json.load(f)
 loop,cs,pf,nTF = data['p'],data['section'],data['pf'],data['nTF']
 color = data['color']
@@ -180,14 +183,17 @@ wp_outer = BRepBuilderAPI_Transform(wp_outer,trans).Shape()
 wp_outer= topods.Wire(wp_outer)  # wire
 
 TFprofile = {}
-TFprofile['case'] = {'upper':[case_upper,case_top],
-                     'outer':[case_top,case_outer,case_bottom],
-                     'lower':[case_bottom,case_lower],
-                     'inner':[case_lower,case_mid,case_upper]}
-TFprofile['wp'] = {'upper':[wp_upper,wp_top],
-                     'outer':[wp_top,wp_outer,wp_bottom],
-                     'lower':[wp_bottom,wp_lower],
-                     'inner':[wp_lower,wp_mid,wp_upper]}
+TFprofile['case'] = OrderedDict()
+TFprofile['case']['upper'] = [case_upper,case_top]
+TFprofile['case']['outer'] = [case_top,case_outer,case_bottom]
+TFprofile['case']['lower'] = [case_bottom,case_lower]
+TFprofile['case']['inner'] = [case_lower,case_mid,case_upper]
+
+TFprofile['wp'] = OrderedDict()
+TFprofile['wp']['upper'] = [wp_upper,wp_top]
+TFprofile['wp']['outer'] = [wp_top,wp_outer,wp_bottom]
+TFprofile['wp']['lower'] = [wp_bottom,wp_lower]
+TFprofile['wp']['inner'] = [wp_lower,wp_mid,wp_upper]
 TFcurve = {'upper':upper_curve,'outer':outer_curve,'lower':lower_curve,
            'inner':inner_curve}
            
@@ -200,7 +206,7 @@ for part in TFprofile:
             pipe.Add(profile)
         pipe.Build()
         segments.append(pipe.Shape())
-    quilt = Construct.sew_shapes(segments[::-1])  #
+    quilt = Construct.sew_shapes(segments)
     TF[part] = Construct.make_solid(quilt)
 
 # outer inter-coil supports
@@ -412,12 +418,11 @@ for name in PFsupport:
         PFSbody = Construct.translate_topods_from_vector(PFSbody,\
         Construct.gp_Vec(0,-shift+PFsup['dt']/2,0))    
         space = (2*shift-PFsup['dt'])/(PFsup['n']-1)
-        ribs = PFSbody
+        TF['case'] = Construct.boolean_fuse(TF['case'],PFSbody)
         for i in np.arange(1,PFsup['n']):
             PFSbody = Construct.translate_topods_from_vector(PFSbody,\
             Construct.gp_Vec(0,space,0))
-            ribs = Construct.boolean_fuse(ribs,PFSbody)
-            #ribs.append(PFSbody)
+            TF['case'] = Construct.boolean_fuse(TF['case'],PFSbody)
     PFSloop = BRepBuilderAPI_MakePolygon()  # PF support
     for node,so in zip(PFsupport[name][:2],[1,-1]):
         for s1 in [1,-1]:
@@ -434,9 +439,7 @@ for name in PFsupport:
     vector *= PFsup['dt']  # sign*
     PFSbody = Construct.make_prism(PFSface,
                                    Construct.gp_Vec(vector[0],0,vector[1]))
-    
-    ribs = Construct.boolean_fuse(PFSbody,ribs)
-    TF['case'] = Construct.boolean_fuse(TF['case'],ribs)  # join seat to body 
+    TF['case'] = Construct.boolean_fuse(TF['case'],PFSbody)  # join seat to body 
 TF['case'] = Construct.boolean_cut(TF['case'],TF['wp'])
 
 TFcage = {}
