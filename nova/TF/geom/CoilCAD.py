@@ -478,9 +478,9 @@ for i in range(len(pf)):
     PFcoil.append(BRepPrimAPI_MakeRevol(PFface,ax).Shape())
 PFcage = Construct.compound(PFcoil) 
 
-#x3d = Construct.compound([TFcage['wp'],TFcage['case'],PFcage,GScage]) 
-#my_renderer = x3dom_renderer.X3DomRenderer()
-#my_renderer.DisplayShape(x3d)
+x3d = Construct.compound([TFcage['wp'],TFcage['case'],PFcage,GScage]) 
+my_renderer = x3dom_renderer.X3DomRenderer()
+my_renderer.DisplayShape(x3d)
        
 
 
