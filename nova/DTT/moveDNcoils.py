@@ -2,7 +2,7 @@ import pylab as pl
 from nova.streamfunction import SF
 from nova.elliptic import EQ
 from nova.inverse import INV
-from nova.config import Setup
+from nova.config import Setup,select
 from itertools import cycle
 import numpy as np
 from nova.radial_build import RB
@@ -22,110 +22,58 @@ sns.set(context='paper',style='white',font='sans-serif',palette='Set2',
         font_scale=7/8,rc=rc)
 Color = cycle(sns.color_palette('Set2'))
 
-pkl = PKL('DN')
+base = {'TF':'dtt','eq':'DN'}
+config,setup = select(base=base,update=False,nTF=18,nPF=4,nCS=3)
 
-config = 'DN'
-setup = Setup(config)
+config['TF'] = config['TF'].replace('DN','SN')
+
 sf = SF(setup.filename)
 rb = RB(setup,sf)
-rb.firstwall(calc=False,plot=False,debug=False)
 pf = PF(sf.eqdsk)
-profile = Profile(config,family='S',part='TF',nTF=18,objective='L')
-tf = TF(profile)
+tf = TF(Profile(config['TF'],family='S',part='TF',
+                nTF=config['nTF'],obj='L',load=True))
+#tf.fill()
 
-eq = EQ(sf,pf,dCoil=2.0,sigma=0,boundary=rb.get_fw(expand=0.5),n=1e4)
-#eq.get_plasma_coil()
-#eq.run(update=False)
-eq.gen_opp()
 
-#sf.contour()
+eq = EQ(sf,pf,dCoil=1.0,sigma=0,n=2e4,boundary=sf.get_sep(expand=1.1),
+        zmin=-abs(sf.Xpoint[1])-2,zmax=abs(sf.Xpoint[1])+2) 
+#eq.gen_opp(Zerr=5e-4)
+eq.gen_bal(Zerr=5e-4,tol=1e-4)
+    
 
 inv = INV(sf,eq,tf)
-Lpf = inv.grid_PF(nPF=6)
-Lcs = inv.grid_CS(nCS=3,Zbound=[-10,10],gap=0.1)
-Lo = np.append(Lpf,Lcs)
+Lpf = inv.grid_PF(nPF=config['nPF'])
+Lcs = inv.grid_CS(nCS=config['nCS'],Zbound=[-8,8],gap=0.1,fdr=1)
+L = np.append(Lpf,Lcs)
 inv.update_coils()
+inv.fit_PF(offset=0.3)
 
-#inv.remove_active(Clist=inv.CS_coils)
-
-inv.fit_PF(offset=0.3)  # fit PF coils to TF
 inv.fix_boundary_psi(N=25,alpha=1-1e-2,factor=1)  # add boundary points
 #inv.fix_boundary_feild(N=25,alpha=1-1e-2,factor=1)  # add boundary points
-
-sf.get_Xpsi()
-inv.add_null(factor=1,point=sf.Xpoint)
-
-sf.get_Xpsi(xo=[sf.Xpoint[0],-sf.Xpoint[1]])
-inv.add_null(factor=1,point=sf.Xpoint)
-sf.get_Xpsi(xo=[sf.Xpoint[0],-sf.Xpoint[1]])
+inv.add_null(factor=1,point=sf.Xpoint_array[:,0])
+inv.add_null(factor=1,point=sf.Xpoint_array[:,1])
      
 inv.set_swing()
-inv.update_limits(LCS=[-14,14])
+inv.update_limits(LCS=[-12,12])
 
-
-Lo = inv.optimize(Lo)
+L = inv.optimize(L)
 inv.plot_fix(tails=True)
 inv.fix_flux(inv.swing['flux'][0]) 
 inv.solve_slsqp()
-
-#eq = EQ(sf,pf,dCoil=2,sigma=0,boundary=tf.get_loop(expand=0),n=1e4)
-#eq.get_plasma_coil()
-#eq.run(update=False)
-eq.gen_opp(Zerr=1e-3)
+#eq.gen_opp(Zerr=5e-4)
+eq.gen_bal(Zerr=5e-4,tol=1e-4)
 
 sf.contour()
-
-
 pf.plot(coils=pf.coil,label=True,plasma=True,current=True) 
 sf.contour(boundary=False)
 
 
-tf.fill()
-
-'''
-demo = DEMO()
-demo.fill_part('Vessel')
-demo.fill_part('Blanket')
-pl.plot(demo.limiter['L3']['r'],demo.limiter['L3']['z'])
-pl.axis('equal')
-pl.tight_layout()
-'''
 loops.plot_variables(inv.Io,scale=1,postfix='MA')
 loops.plot_variables(inv.Lo,scale=1)
+
+
+sf.eqwrite(pf,config=config['eq'])
+
+pkl = PKL(config['eq'],directory='../../Movies/')
 pkl.write(data={'sf':sf,'eq':eq,'inv':inv})  # pickle data
-sf.eqwrite(pf)
-
-'''
-
-#inv.write_swing()
-#sf.eqwrite(config='SXex')
-
-for swing in np.linspace(-20,80,5):
-    pl.figure()
-    pl.axis('equal')
-    pl.axis('off')
-
-    inv.swing_fix(swing)
-    inv.solve() 
-    
-    inv.update_coils(plot=True)
-    sf.plot_coils(Color,coils=sf.coil,label=False,plasma=False,current=True) 
-    sf.plot_coils(Color,coils=eq.coil,label=False,plasma=False) 
- 
-    eq.run()
-    
-    sf.contour()
-    eq.plasma()
-    #eq.plotb()
-    #sf.eqwrite(config='SXex')
-    pl.plot(sf.rbdry,sf.zbdry,'--')
-    inv.plot_fix()
-
-print('L3D',inv.rb.sol.connection('outer',0)[-1][-1])
-print('R',Rsol[-1])
-print('R/X',Rsol[-1]/sf.Xpoint[0])
-print('Itotal',inv.Itotal*1e-6,'MA')
-print('R',rb.targets['outer']['Rsol'][-1],'Z',
-      rb.targets['outer']['Zsol'][-1])
-'''
 
