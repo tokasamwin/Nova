@@ -10,7 +10,6 @@ for i,c in enumerate(colors):
     QC[i] = Quantity_Color(*c,Quantity_TOC_RGB)
     QC[i].ChangeIntensity(-50)
     
-import aocxchange
 from collections import OrderedDict
 from OCC.Display.WebGl import x3dom_renderer
 from OCC.gp import gp_Pnt, gp_Trsf, gp_Ax1, gp_Ax2
