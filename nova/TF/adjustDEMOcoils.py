@@ -46,26 +46,26 @@ demo.plot_limiter()
 pl.axis('off')
 #tf.fill()
 
-sf.cpasma *= 1.1
-
-eq = EQ(sf,pf,dCoil=0.5,sigma=0,boundary=sf.get_sep(expand=1.5),n=5e3) 
-
+sf.cpasma *= 1.0
+eq = EQ(sf,pf,dCoil=1.5,sigma=0,boundary=sf.get_sep(expand=1.5),n=5e3) 
 eq.gen_opp()
 
 sf.contour()
 
-eq.plotb()
+#eq.plotb()
 
 
-'''
+
 inv = INV(sf,eq,tf)
 L = inv.grid_coils(offset=0.3)
 #pf.plot(coils=pf.coil,label=False,plasma=False,current=True) 
 
 inv.fix_boundary_psi(N=25,alpha=1-1e-4,factor=1)  # add boundary points
-inv.fix_boundary_feild(N=25,alpha=1-1e-4,factor=1)  # add boundary points
+#inv.fix_boundary_feild(N=25,alpha=1-1e-4,factor=1)  # add boundary points
 inv.add_null(factor=1,point=sf.Xpoint)
         
+
+
 inv.set_swing()
 inv.update_limits(LCS=[-9.5,9.5])
 
@@ -85,5 +85,4 @@ inv.plot_fix(tails=True)
 
 inv.ff.plot(scale=1.5)
 
-sf.eqwrite(pf,config=config['eq'])
-'''
+#sf.eqwrite(pf,config=config['eq'])
