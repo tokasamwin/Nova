@@ -46,7 +46,7 @@ class Setup(object):
         self.firstwall['psi_n'] = 1.07
         self.firstwall['div_ex'] = 0.25
         self.firstwall['trim'] = [0.75,0.7]
-        self.firstwall['flux_fit'] = True
+        self.firstwall['flux_fit'] = False
         self.firstwall['conformal'] = False
         self.build = {}  # initalise build data structure
         self.build['tfw'] = 0.1  # first wall thickness
@@ -205,6 +205,24 @@ class Setup(object):
             self.firstwall['trim'] = [0.88,0.95]  # trim fraction (in/out)
             self.targets['inner'] = {'L2D':1.0}  # 0.6
             self.targets['outer'] = {'L2D':1.36}  # 0.65
+            
+        elif configuration == 'SN2014_SOF':
+            self.dataname = 'DEMO_SN2014'
+            self.filename = 'Equil_2016_DTT1_SN_2017_01_11PF_SOF_Ipl_20d25MA'
+            self.filename += '_bt_1d03_li_0d8_R0_8d76m_final.eqdsk'
+            self.firstwall['div_ex'] = 0.5  # 0.25
+            self.firstwall['trim'] = [0.88,0.95]  # trim fraction (in/out)
+            self.targets['inner'] = {'L2D':1.0}  # 0.6
+            self.targets['outer'] = {'L2D':1.36}  # 0.65         
+            
+        elif configuration == 'SN2014_EOF':
+            self.dataname = 'DEMO_SN2014'
+            self.filename = 'Equil_2016_DTT1_SN_2017_01_11PF_EOF_Ipl_20d25MA'
+            self.filename += '_bt_1d03_li_0d8_R0_8d76m_v2.eqdsk'
+            self.firstwall['div_ex'] = 0.5  # 0.25
+            self.firstwall['trim'] = [0.88,0.95]  # trim fraction (in/out)
+            self.targets['inner'] = {'L2D':1.0}  # 0.6
+            self.targets['outer'] = {'L2D':1.36}  # 0.65  
 
         elif configuration == 'DEMO_SNc':
             self.dataname = 'DEMO_SN'
@@ -216,12 +234,11 @@ class Setup(object):
 
         elif configuration == 'DN':
             self.dataname = 'DN'
-            self.firstwall['div_ex'] = 0.5
+            self.firstwall['div_ex'] = 0.65
             self.targets['inner'] = {'L2D':1.0}
             self.targets['outer'] = {'L2D':1.36}
             self.filename = 'Equil_FT_R0_9d197_k95_1d59_delta95_0d33_final_opt.eqdsk'
         else:
             self.filename = configuration+'.eqdsk'
         self.filename = self.eqdir+self.filename
-
                 

@@ -8,7 +8,7 @@ from nova.DEMOxlsx import DEMO
 from nova.coils import TF
 from nova.loops import set_oppvar,get_oppvar,plot_oppvar,remove_oppvar,Profile
 from nova.coil_cage import coil_cage
-from nova.config import Setup
+from nova.config import Setup,select
 from nova.streamfunction import SF
 import matplotlib.animation as manimation
 import sys
@@ -23,7 +23,10 @@ class Shape(object):
         self.loop = self.profile.loop
         self.nTF = nTF
         self.obj = obj
-        #self.update()
+        #try:
+        #    self.update()
+        #except:
+        #    pass
         self.bound = {}  # initalise bounds
         for side in ['internal','interior','external']:
             self.bound[side] = {'r':[],'z':[]}
@@ -90,6 +93,7 @@ class Shape(object):
         xo = get_oppvar(self.loop.xo,self.loop.oppvar,xnorm)  # de-normalize
         self.loop.set_input(x=xo)  # inner loop
         self.profile.write(nTF=self.nTF,obj=self.obj)  # store loop
+        print('write')
         if verbose:
             self.toc(tic,xo)
 
@@ -99,9 +103,13 @@ class Shape(object):
         if self.nTF is not 'unset':
             x = self.tf.get_loops(self.loop.draw(x=xo))
             self.cage.set_TFcoil(x['cl'],smooth=True)
-            print('ripple',self.cage.get_ripple())
-            print('energy {:1.2f}GJ'.format(1e-9*self.cage.energy()))
-
+            Vol = self.cage.get_volume()
+            print('ripple {:1.3f}'.format(self.cage.get_ripple()))
+            print('energy {:1.2f} GJ'.format(1e-9*self.cage.energy()))
+            print(r'TF volume {:1.0f} m3'.format(Vol['TF']))
+            print(r'plasma volume {:1.0f} m3'.format(Vol['plasma']))
+            print('ratio {:1.2f}'.format(Vol['ratio']))
+            
     def constraint_array(self,xnorm,*args):
         ripple,ripple_limit = args
         xo = get_oppvar(self.loop.xo,self.loop.oppvar,xnorm)  # de-normalize
@@ -166,24 +174,9 @@ class Shape(object):
             to = time.time()
             width = 35
             for i,xo in enumerate(self.xo):
-                pl.sca(ax[0])
-                pl.cla()
-                pl.plot([3,18],[-10,10],'ko',alpha=0)
-                self.loop.set_input(x=xo)
-                demo.fill_part('Blanket')
-                demo.fill_part('Vessel')
-                self.plot_bounds()
-                self.update()
-                self.tf.fill()
-                geom.polyfill(self.cage.plasma_loop[:,0],
-                              self.cage.plasma_loop[:,2],
-                              alpha=0.3,color=sns.color_palette('Set2',5)[3])
-                #self.cage.plot_loops(sticks=False)
-                pl.sca(ax[1])
-                pl.cla()
-                plot_oppvar(shp.loop.xo,shp.loop.oppvar)
+                self.frame(ax,demo,xo)
                 writer.grab_frame()
-                
+        
                 if i%1 == 0 and i > 0:
                     elapsed = time.time()-to
                     remain = int((nS-i)/i*elapsed)
@@ -197,28 +190,55 @@ class Shape(object):
                     prog_str += ' |'+nh*'#'+(width-nh)*'-'+'|'
                     sys.stdout.write(prog_str)
                     sys.stdout.flush()
+                    
+    def frames(self,filename):
+        fig,ax = pl.subplots(1,2,figsize=(12,8))
+        demo = DEMO()
+        figname = '../Figs/{}'.format(filename)
+        self.frame(ax,demo,self.xo[0])
+        pl.savefig(figname+'_s.png')
+        self.frame(ax,demo,self.xo[-1])
+        pl.savefig(figname+'_e.png')
+        
+                
+    def frame(self,ax,demo,xo):
+        pl.sca(ax[0])
+        pl.cla()
+        pl.plot([3,18],[-10,10],'ko',alpha=0)
+        self.loop.set_input(x=xo)
+        demo.fill_part('Blanket')
+        demo.fill_part('Vessel')
+        self.plot_bounds()
+        self.update()
+        self.tf.fill()
+        geom.polyfill(self.cage.plasma_loop[:,0],
+                      self.cage.plasma_loop[:,2],
+                      alpha=0.3,color=sns.color_palette('Set2',5)[3])
+        #self.cage.plot_loops(sticks=False)
+        pl.sca(ax[1])
+        pl.cla()
+        plot_oppvar(shp.loop.xo,shp.loop.oppvar)
+
                 
 if __name__ is '__main__': 
 
-    nTF = 18
+    nTF = 16
     family='S'
-    ripple = True
+    ripple = False
 
-    config = {'TF':'dtt','eq':'SN'}
-    config['TF'] = '{}{}{:d}'.format(config['eq'],config['TF'],nTF)
+    config = {'TF':'demo','eq':'SN'}
+    config,setup = select(config,nTF=nTF)
+    
 
     demo = DEMO()
-    demo.fill_part('Blanket')
-    demo.fill_part('Vessel')
-    #demo.fill_part('TF_Coil')
 
-    profile = Profile(config['TF'],family=family,part='tmp',load=False)
+    profile = Profile(config['TF'],family=family,part='TF',load=False)
     shp = Shape(profile,nTF=nTF,obj='L',eqconf=config['eq'],ny=3)
     shp.add_vessel(demo.parts['Vessel']['out'])
     shp.minimise(ripple=ripple,verbose=True)
     
     shp.update()
-    shp.tf.fill()
+    #shp.tf.fill()
     #shp.loop.plot({'flat':0.3,'tilt':13})
     #shp.loop.plot()
     #demo.fill_part('TF_Coil',alpha=0.8)
@@ -226,6 +246,7 @@ if __name__ is '__main__':
     #shp.cage.pattern(plot=True)
     #plot_oppvar(shp.loop.xo,shp.loop.oppvar)
 
-    moviename = '{}_{}_{}'.format(config['TF'],family,ripple)
-    shp.movie(moviename)
+    filename = '{}_{}_{}'.format(config['TF'],family,ripple)
+    #shp.movie(filename)
+    shp.frames(filename)
     #pl.savefig('../Figs/TFloop_{}.png'.format(family))

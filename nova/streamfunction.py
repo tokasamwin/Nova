@@ -11,6 +11,7 @@ from matplotlib._cntr import Cntr as cntr
 from collections import OrderedDict
 from amigo import geom
 from amigo.IO import trim_dir
+from amigo.geom import loop_vol
 
 class SF(object):
     
@@ -32,8 +33,8 @@ class SF(object):
         self.get_Mpsi()
         self.set_contour()  # set cfeild
         #self.get_sol_psi(dSOL=3e-3,Nsol=15,verbose=False)
-        self.rcirc = 0.2*abs(self.Mpoint[1]-self.Xpoint[1])  # leg search radius
-        self.drcirc = 0.25*self.rcirc  # leg search width
+        self.rcirc = 0.3*abs(self.Mpoint[1]-self.Xpoint[1])  # leg search radius
+        self.drcirc = 0.1*self.rcirc  # leg search width
         self.xlim = self.eqdsk['xlim']
         self.ylim = self.eqdsk['ylim']
         self.nlim = self.eqdsk['nlim']
@@ -361,7 +362,8 @@ class SF(object):
                 xo = self.xo
             else:
                 xo_arg = np.argmin(self.eqdsk['zbdry'])
-                xo = [self.eqdsk['rbdry'][xo_arg],self.eqdsk['zbdry'][xo_arg]]
+                xo = [self.eqdsk['rbdry'][xo_arg],
+                      self.eqdsk['zbdry'][xo_arg]]
         Xpoint = np.zeros((2,2))
         Xpsi = np.zeros(2)
         for i,flip in enumerate([1,-1]):
@@ -878,7 +880,7 @@ class SF(object):
         return L2D,L3D,Rsol,Zsol
         
     def shape_parameters(self,plot=False):
-        from nova.coils import loop_vol
+        self.get_LFP()
         a = (self.LFPr-self.HFPr)/2
         R = (self.LFPr+self.HFPr)/2
         AR = R/a
@@ -889,7 +891,7 @@ class SF(object):
         del_l = (R-rl)/a
         kappa = (np.max(z95)-np.min(z95))/(2*a)
         r,z = self.get_boundary(alpha=1)
-        r,z = self.clock(r,z,anti=True)
+        r,z = geom.clock(r,z,reverse=True)
         V = loop_vol(r,z,plot=plot)
         shape = {'AR':AR,'del_u':del_u,'del_l':del_l,'kappa':kappa,'volume':V}
         return shape

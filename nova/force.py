@@ -102,10 +102,10 @@ class force_feild(object):
             r,z = self.pf_coil[name]['r'],self.pf_coil[name]['z']
             F = self.F[i]
             pl.arrow(r,z,scale*F[0]/Fmax,0,  # Fr
-                     linewidth=2,head_width=0.4,head_length=0.6,
+                     linewidth=2,head_width=0.3,head_length=0.4,
                      ec=0.4*np.ones(3),fc=0.7*np.ones(3))
             pl.arrow(r,z,0,scale*F[1]/Fmax,  # Fz
-                     linewidth=2,head_width=0.4,head_length=0.6,
+                     linewidth=2,head_width=0.3,head_length=0.4,
                      ec=0.4*np.ones(3),fc=0.7*np.ones(3))
             if name in self.index['PF']['name']:
                 zarrow = scale*F[1]/Fmax
@@ -115,8 +115,9 @@ class force_feild(object):
                     va = 'bottom'
                 else:
                     va = 'top' 
-                pl.text(r,z+zarrow,'{:1.2f}MN'.format(F[1]),
-                        ha='center',va=va,fontsize=1.1*fs,color=0.5*np.ones(3))
+                pl.text(r,z+1.1*zarrow,'{:1.2f}MN'.format(F[1]),
+                        ha='center',va=va,fontsize=1.1*fs,color=0.1*np.ones(3),
+                        backgroundcolor=0.9*np.ones(3))
                 
     def topple(self,point,J,cage,Bpoint,method='function',**kwargs):
         # eq.Bpoint == point calculated method (slow)
@@ -143,7 +144,7 @@ class force_feild(object):
             raise ValueError(errtxt) 
         if method == 'function':
             b = np.zeros(3)
-            b[1] = bm/point[0]  # TF feild (fast version / only good for TF cl)
+            b[2] = -bm/point[0]  # TF feild (fast version / only good for TF cl)
         elif method == 'BS':  # calculate tf feild with full Biot-Savart
             b = cage.point(point,variable='feild') # (slow / correct)
         theta = np.arctan2(point[1],point[0])
