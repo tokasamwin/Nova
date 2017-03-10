@@ -890,9 +890,10 @@ class SF(object):
         del_u = (R-ru)/a
         del_l = (R-rl)/a
         kappa = (np.max(z95)-np.min(z95))/(2*a)
-        r,z = self.get_boundary(alpha=1)
+        r,z = self.get_boundary(alpha=1-1e-4)
         r,z = geom.clock(r,z,reverse=True)
         V = loop_vol(r,z,plot=plot)
-        shape = {'AR':AR,'del_u':del_u,'del_l':del_l,'kappa':kappa,'volume':V}
+        shape = {'AR':AR,'del_u':del_u,'del_l':del_l,'kappa':kappa,'volume':V,
+                 'R':R}
         return shape
 

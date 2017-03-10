@@ -7,14 +7,14 @@ from nova.coils import PF,TF
 from nova.inverse import INV
 from nova.TF.ripple import ripple
 import numpy as np
-import scipy
 from time import time
 import amigo.geom as geom
 from nova.loops import Profile,plot_oppvar
 from nova.shape import Shape
 from nova.DEMOxlsx import DEMO
 from nova.force import force_feild
-import json
+from nova.firstwall import targets,firstwall
+
 from amigo.IO import trim_dir
 from nova.shelf import PKL
 
@@ -28,7 +28,9 @@ sns.set(context='talk',style='white',font='sans-serif',palette='Set2',
 #config,setup = select(base={'TF':'dtt','eq':'SN'},nTF=18,nPF=5,nCS=3)
 #config,setup = select(base={'TF':'dtt','eq':'SX'},nTF=18,nPF=5,nCS=3)
 #config,setup = select(base={'TF':'dtt','eq':'DEMO_FW_SOF'},nTF=18)
-config,setup = select(base={'TF':'dtt','eq':'SN2014_SOF'},nTF=18)
+config,setup = select(base={'TF':'dtt','eq':'SN2014_EOF'},nTF=18)
+
+setup.firstwall['flux_fit'] = False
 
 if 'DN' in setup.configuration:
     DN = True
@@ -36,12 +38,20 @@ else:
     DN = False
 
 sf = SF(setup.filename)  
-print(sf.shape_parameters())
 
-print(sf.eqdsk['bcentr']*sf.eqdsk['rcentr'])
+sf.shape_parameters()  #verbose=True
 
 pf = PF(sf.eqdsk)
 
+#target = targets(sf,setup.targets)
+
+#target.place(debug=True)
+
+sf = []
+for configuration in ['SN2014_SOF','SN2014_EOF']:
+    sf.append(SF(Setup(configuration).filename))
+
+firstwall('SNfw',sf,psi_n=1.07,flux_fit=False,debug=True)
 
 '''
 eq = EQ(sf,pf,dCoil=1.5,sigma=0,n=5e3,boundary=sf.get_sep(expand=1.1),
@@ -50,18 +60,22 @@ eq = EQ(sf,pf,dCoil=1.5,sigma=0,n=5e3,boundary=sf.get_sep(expand=1.1),
 eq.gen_bal(Zerr=5e-4,tol=1e-4)
 '''
 
-
 pf.plot(coils=pf.coil,label=True,plasma=False,current=False) 
-sf.contour()
 
+'''
 rb = RB(setup,sf)
 
-rb.firstwall(symetric=DN,DN=DN,plot=True,debug=False)
+rb.firstwall(symetric=DN,DN=DN,plot=True,debug=False)  # ,mode='eqdsk'
 rb.trim_sol()
 
+rb.json()
+'''
+
+'''
 if DN:
     sf.get_Xpsi(select='upper')  # upper X-point
     rb.trim_sol()
+
 
 nTF = config['nTF']
 profile = Profile(config['TF'],family='S',part='TF',
@@ -72,14 +86,17 @@ shp.add_vessel(rb.segment['vessel_outer'])
 shp.loop.adjust_xo('l',lb=0.75)  # 1/tesion
 shp.loop.adjust_xo('upper',lb=0.5)
 shp.loop.adjust_xo('lower',lb=0.5)
-shp.minimise(ripple=True,verbose=True)
+shp.minimise(ripple=False,verbose=True)
 shp.update()
 tf = TF(profile,sf=sf)
 tf.fill()
+'''
+
 
 pl.plot(3,-11.5,'o',alpha=0)
 pl.plot(16,7.5,'o',alpha=0)
 pl.tight_layout()
+
 
 '''
 demo = DEMO()
@@ -89,9 +106,9 @@ demo.fill_part('TF_Coil',alpha=1)
 '''  
 
 
-'''
-sf.eqwrite(pf,config=config['eq'],CREATE=True)
+#sf.eqwrite(pf,config=config['eq'],CREATE=True)
 
+'''
 pkl = PKL(config['eq'],directory='../../Movies/')
 sf,eq,inv = pkl.fetch(['sf','eq','inv'])
 for i,(flux,S) in enumerate(zip(inv.swing['flux'],['SOF','MOF','EOF'])):
@@ -99,19 +116,7 @@ for i,(flux,S) in enumerate(zip(inv.swing['flux'],['SOF','MOF','EOF'])):
     inv.solve_slsqp()
     inv.eq.gen_opp()
     sf.eqwrite(inv.eq.pf,config=config['eq']+'_{}'.format(S),CREATE=True)
-
-
-data = {}
-for loop in ['first_wall','blanket','vessel_inner','vessel_outer']:
-    data[loop] = {}
-    for var in rb.segment[loop]:
-        data[loop][var] = list(rb.segment[loop][var])
-for loop,label in zip(['in','out'],['TF_inner','TF_outer']):
-    data[label] = {}
-    for var in tf.x[loop]:
-        data[label][var] = list(tf.x[loop][var])
-datadir = trim_dir('../../../Data/') 
-with open(datadir+'{}.json'.format(config['eq']),'w') as f:
-    json.dump(data,f,indent=4)
-
 '''
+
+
+
